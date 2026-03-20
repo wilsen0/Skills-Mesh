@@ -1,9 +1,8 @@
-import { readFile } from "fs/promises";
+import { readdir, readFile } from "fs/promises";
 import { join } from "path";
+import { getProjectPaths } from "./paths.js";
+import type { ArtifactKey, DoctrineId, SkillManifest } from "./types.js";
 
-/**
- * 解析后的规则
- */
 export interface ParsedRule {
   id: string;
   title: string;
@@ -11,76 +10,80 @@ export interface ParsedRule {
   params: Record<string, unknown>;
 }
 
-/**
- * 规则文档
- */
 export interface RulesDocument {
   file: string;
   rules: ParsedRule[];
   tables: Array<{ headers: string[]; rows: string[][] }>;
 }
 
-/**
- * 从 markdown 文件加载规则
- * 
- * 解析两种格式：
- * 1. 代码块注释标记: // @rule <id> [key=value ...]
- * 2. 表格: 自动提取 headers + rows
- */
+export interface RuleCard {
+  id: string;
+  doctrineId: DoctrineId;
+  appliesTo: Array<SkillManifest["name"] | string>;
+  inputs: ArtifactKey[];
+  condition: Record<string, unknown>;
+  action: Record<string, unknown>;
+  priority: number;
+  severity: "low" | "medium" | "high";
+  docPath: string;
+}
+
+export interface DoctrineCard {
+  id: DoctrineId;
+  name: string;
+  principles: string[];
+  defaultWeights: Record<string, number>;
+  riskBias: string;
+  linkedRuleIds: string[];
+  docPath: string;
+}
+
+interface RuleCardFile {
+  rules: RuleCard[];
+}
+
+function projectJoin(...parts: string[]): string {
+  return join(getProjectPaths().projectRoot, ...parts);
+}
+
 export async function loadRules(filename: string): Promise<RulesDocument> {
-  const filepath = join(process.cwd(), "docs/rules", filename);
+  const filepath = projectJoin("docs", "rules", filename);
   const content = await readFile(filepath, "utf-8");
-  
+
   const rules = extractRules(content);
   const tables = extractTables(content);
-  
+
   return { file: filename, rules, tables };
 }
 
-/**
- * 从代码块提取规则
- * 
- * 示例:
- * ```typescript
- * // @rule max-single-order description="单笔限额"
- * const maxSingleOrderNotionalUsd = accountEquity * 0.02;
- * ```
- */
 function extractRules(content: string): ParsedRule[] {
   const rules: ParsedRule[] = [];
-  
-  // 匹配 ```typescript 代码块
   const codeBlockRegex = /```typescript\n([\s\S]*?)```/g;
-  let match;
-  
+  let match: RegExpExecArray | null;
+
   while ((match = codeBlockRegex.exec(content)) !== null) {
     const code = match[1];
-    
-    // 查找 @rule 标记
     const ruleRegex = /\/\/\s*@rule\s+(\S+)(?:\s+(.*))?/g;
-    let ruleMatch;
-    
+    let ruleMatch: RegExpExecArray | null;
+
     while ((ruleMatch = ruleRegex.exec(code)) !== null) {
       const id = ruleMatch[1];
       const paramsStr = ruleMatch[2] || "";
-      
-      // 解析 key=value 参数
       const params: Record<string, string> = {};
       const paramRegex = /(\w+)="([^"]+)"/g;
-      let paramMatch;
+      let paramMatch: RegExpExecArray | null;
       while ((paramMatch = paramRegex.exec(paramsStr)) !== null) {
         params[paramMatch[1]] = paramMatch[2];
       }
-      
+
       rules.push({
         id,
-        title: params.description || id,
+        title: String(params.description || id),
         code: code.trim(),
         params,
       });
     }
-    
-    // 如果没有 @rule 标记，用代码块第一行注释作为标题
+
     if (!code.includes("@rule")) {
       const firstLine = code.split("\n")[0];
       const commentMatch = firstLine.match(/\/\/\s*(.+)/);
@@ -94,36 +97,27 @@ function extractRules(content: string): ParsedRule[] {
       }
     }
   }
-  
+
   return rules;
 }
 
-/**
- * 从 markdown 提取表格
- */
 function extractTables(content: string): Array<{ headers: string[]; rows: string[][] }> {
   const tables: Array<{ headers: string[]; rows: string[][] }> = [];
-  
   const tableRegex = /\|(.+)\|\n\|[-\s|:]+\|\n((?:\|.+\|\n?)+)/g;
-  let match;
-  
+  let match: RegExpExecArray | null;
+
   while ((match = tableRegex.exec(content)) !== null) {
-    const headers = match[1].split("|").map(h => h.trim()).filter(Boolean);
-    const rowsStr = match[2];
-    const rows = rowsStr
+    const headers = match[1].split("|").map((header) => header.trim()).filter(Boolean);
+    const rows = match[2]
       .trim()
       .split("\n")
-      .map(row => row.split("|").map(cell => cell.trim()).filter(Boolean));
-    
+      .map((row) => row.split("|").map((cell) => cell.trim()).filter(Boolean));
     tables.push({ headers, rows });
   }
-  
+
   return tables;
 }
 
-/**
- * 字符串转 slug
- */
 function slugify(str: string): string {
   return str
     .toLowerCase()
@@ -131,23 +125,71 @@ function slugify(str: string): string {
     .replace(/^-|-$/g, "");
 }
 
-/**
- * 查找规则 by ID
- */
 export function findRule(doc: RulesDocument, id: string): ParsedRule | undefined {
-  return doc.rules.find(r => r.id === id);
+  return doc.rules.find((rule) => rule.id === id);
 }
 
-/**
- * 从表格查找行 by 列值
- */
 export function findTableRow(
   table: { headers: string[]; rows: string[][] },
   column: string,
-  value: string
+  value: string,
 ): string[] | undefined {
   const colIndex = table.headers.indexOf(column);
-  if (colIndex === -1) return undefined;
-  
-  return table.rows.find(row => row[colIndex] === value);
+  if (colIndex === -1) {
+    return undefined;
+  }
+
+  return table.rows.find((row) => row[colIndex] === value);
+}
+
+async function loadJson<T>(path: string): Promise<T> {
+  const contents = await readFile(path, "utf8");
+  return JSON.parse(contents) as T;
+}
+
+export async function loadDoctrineCards(): Promise<DoctrineCard[]> {
+  const doctrinesRoot = projectJoin("doctrines");
+  const entries = await readdir(doctrinesRoot);
+  const cards = await Promise.all(
+    entries
+      .filter((entry) => entry.endsWith(".json"))
+      .sort()
+      .map((entry) => loadJson<DoctrineCard>(join(doctrinesRoot, entry))),
+  );
+  return cards;
+}
+
+export async function loadRuleCards(): Promise<RuleCard[]> {
+  const rulesRoot = projectJoin("rules");
+  const entries = await readdir(rulesRoot);
+  const files = await Promise.all(
+    entries
+      .filter((entry) => entry.endsWith(".rule.json"))
+      .sort()
+      .map((entry) => loadJson<RuleCardFile>(join(rulesRoot, entry))),
+  );
+
+  return files.flatMap((file) => file.rules);
+}
+
+export async function validateRuleDocs(): Promise<{
+  ok: boolean;
+  missingInDocs: string[];
+  extraInDocs: string[];
+}> {
+  const ruleCards = await loadRuleCards();
+  const markdownDocs = await Promise.all(
+    ["trend-following.md", "risk-limits.md", "hedging-strats.md"].map((filename) => loadRules(filename)),
+  );
+  const docRuleIds = new Set(markdownDocs.flatMap((doc) => doc.rules.map((rule) => rule.id)));
+  const canonicalRuleIds = new Set(ruleCards.map((rule) => rule.id));
+
+  const missingInDocs = [...canonicalRuleIds].filter((id) => !docRuleIds.has(id)).sort();
+  const extraInDocs = [...docRuleIds].filter((id) => !canonicalRuleIds.has(id)).sort();
+
+  return {
+    ok: missingInDocs.length === 0,
+    missingInDocs,
+    extraInDocs,
+  };
 }

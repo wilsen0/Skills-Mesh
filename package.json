@@ -9,7 +9,10 @@
   "files": [
     "dist",
     "skills",
-    "profiles"
+    "profiles",
+    "docs",
+    "rules",
+    "doctrines"
   ],
   "scripts": {
     "build": "tsc -p tsconfig.json",

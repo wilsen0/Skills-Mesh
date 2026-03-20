@@ -1,0 +1,23 @@
+{
+  "id": "vol-hedging",
+  "name": "Volatility-Aware Hedging",
+  "principles": [
+    "Prefer option convexity when volatility is affordable",
+    "Prefer linear hedges when implied volatility is expensive",
+    "Match hedge style to holding period and bleed tolerance"
+  ],
+  "defaultWeights": {
+    "funding": 0.25,
+    "volatility": 0.45,
+    "carry": 0.3
+  },
+  "riskBias": "cost-aware-hedging",
+  "linkedRuleIds": [
+    "perp-short-calc",
+    "protective-put-calc",
+    "collar-calc",
+    "funding-rate-priority",
+    "iv-percentile-priority"
+  ],
+  "docPath": "docs/rules/hedging-strats.md"
+}

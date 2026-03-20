@@ -1,12 +1,21 @@
 import { executeIntent, inspectOkxEnvironment } from "./okx.js";
-import { evaluateApplyPolicy } from "./policy.js";
+import { createArtifactStore, putArtifact } from "./artifacts.js";
+import { runPlanningGraph } from "./graph-runtime.js";
+import { evaluatePolicy } from "./policy.js";
 import { loadSkillHandler, loadSkillRegistry } from "./registry.js";
-import { buildPlanningRoute, buildRunRoute, resolveExecutor } from "./router.js";
-import { createRunId, listRunIds, loadRun, saveRun } from "./trace.js";
+import {
+  createRunId,
+  listRunIds,
+  loadArtifactSnapshot,
+  loadRun,
+  saveArtifactSnapshot,
+  saveRun,
+} from "./trace.js";
 import type {
+  ArtifactStore,
   CapabilitySnapshot,
-  ExecutionPlane,
   ExecutionErrorCategory,
+  ExecutionPlane,
   ExecutionRecord,
   ExecutionResult,
   OkxCommandIntent,
@@ -21,7 +30,6 @@ import type {
   SkillPermissions,
   SkillProposal,
   SkillRisk,
-  SwapOrderPlanStep,
 } from "./types.js";
 
 interface PlanOptions {
@@ -37,6 +45,13 @@ interface ApplyOptions {
 
 interface ReplayOptions {
   skill?: string;
+}
+
+interface ExecutionBundle {
+  proposal: string;
+  orderPlan: OrderPlanStep[];
+  intents: OkxCommandIntent[];
+  commandPreview?: string[];
 }
 
 type HydrateInput = Omit<
@@ -70,10 +85,6 @@ const RUN_STATUS_SET = new Set<RunStatus>([
 
 function now(): string {
   return new Date().toISOString();
-}
-
-function latestTraceEntry(trace: SkillOutput[], skillName: string): SkillOutput | undefined {
-  return [...trace].reverse().find((entry) => entry.skill === skillName);
 }
 
 function allowedModulesForPlane(plane: ExecutionPlane): string[] {
@@ -133,137 +144,9 @@ function normalizeProposal(proposal: SkillProposal): SkillProposal {
 
   return {
     ...proposal,
-    requiredModules,
     intents,
+    requiredModules,
   };
-}
-
-function parseIntentLike(raw: unknown): OkxCommandIntent | null {
-  if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
-    return null;
-  }
-
-  const record = raw as Record<string, unknown>;
-  const command = typeof record.command === "string" ? record.command : null;
-  const module = typeof record.module === "string" ? record.module : null;
-  const reason = typeof record.reason === "string" ? record.reason : null;
-  const requiresWrite = record.requiresWrite === true;
-  if (!command || !module || !reason) {
-    return null;
-  }
-
-  const args = Array.isArray(record.args)
-    ? record.args.filter((item): item is string => typeof item === "string")
-    : command.trim().split(/\s+/);
-  if (args.length === 0) {
-    return null;
-  }
-
-  return {
-    command,
-    args,
-    module,
-    requiresWrite,
-    reason,
-  };
-}
-
-function extractExecutorIntents(output: SkillOutput, fallbackIntents: OkxCommandIntent[]): OkxCommandIntent[] {
-  const metadata = output.metadata;
-  if (!metadata || typeof metadata !== "object") {
-    return fallbackIntents;
-  }
-
-  const rawIntents = (metadata as Record<string, unknown>).intents;
-  if (!Array.isArray(rawIntents)) {
-    return fallbackIntents;
-  }
-
-  const parsed = rawIntents
-    .map((intent) => parseIntentLike(intent))
-    .filter((intent): intent is OkxCommandIntent => Boolean(intent));
-  return parsed.length > 0 ? parsed : fallbackIntents;
-}
-
-function parseOrderPlanStepLike(raw: unknown): OrderPlanStep | null {
-  if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
-    return null;
-  }
-
-  const record = raw as Record<string, unknown>;
-  const paramsRaw = record.params;
-  if (!paramsRaw || typeof paramsRaw !== "object" || Array.isArray(paramsRaw)) {
-    return null;
-  }
-  const params = paramsRaw as Record<string, unknown>;
-  const kind = record.kind;
-  const purpose = record.purpose;
-  const symbol = record.symbol;
-  const targetNotionalUsd = record.targetNotionalUsd;
-  const targetPremiumUsd = record.targetPremiumUsd;
-  const referencePx = record.referencePx;
-  const instId = params.instId;
-  const side = params.side;
-  const sz = params.sz;
-  if (kind === "swap-place-order") {
-    const tdMode = params.tdMode;
-    const ordType = params.ordType;
-    if (
-      typeof purpose !== "string" ||
-      typeof symbol !== "string" ||
-      typeof targetNotionalUsd !== "number" ||
-      typeof referencePx !== "number" ||
-      typeof instId !== "string" ||
-      typeof tdMode !== "string" ||
-      typeof side !== "string" ||
-      typeof ordType !== "string" ||
-      typeof sz !== "string"
-    ) {
-      return null;
-    }
-
-    return raw as SwapOrderPlanStep;
-  }
-
-  if (kind === "option-place-order") {
-    const px = params.px;
-    if (
-      typeof purpose !== "string" ||
-      typeof symbol !== "string" ||
-      typeof targetPremiumUsd !== "number" ||
-      typeof referencePx !== "number" ||
-      typeof instId !== "string" ||
-      typeof side !== "string" ||
-      typeof sz !== "string" ||
-      typeof px !== "string"
-    ) {
-      return null;
-    }
-
-    return raw as OrderPlanStep;
-  }
-
-  return null;
-}
-
-function extractExecutorOrderPlan(
-  output: SkillOutput,
-  fallback: OrderPlanStep[] | undefined,
-): OrderPlanStep[] | undefined {
-  const metadata = output.metadata;
-  if (!metadata || typeof metadata !== "object") {
-    return fallback;
-  }
-
-  const rawOrderPlan = (metadata as Record<string, unknown>).orderPlan;
-  if (!Array.isArray(rawOrderPlan)) {
-    return fallback;
-  }
-
-  const parsed = rawOrderPlan
-    .map((step) => parseOrderPlanStepLike(step))
-    .filter((step): step is OrderPlanStep => Boolean(step));
-  return parsed.length > 0 ? parsed : fallback;
 }
 
 async function executeSkill(
@@ -334,13 +217,11 @@ function collectFacts(trace: SkillOutput[]): string[] {
 
 function collectConstraints(trace: SkillOutput[]): Record<string, unknown> {
   const merged: Record<string, unknown> = {};
-
   for (const entry of trace) {
     for (const [key, value] of Object.entries(entry.constraints)) {
       merged[key] = key in merged ? mergeConstraintValue(merged[key], value) : value;
     }
   }
-
   return merged;
 }
 
@@ -350,14 +231,9 @@ function collectProposals(trace: SkillOutput[]): SkillProposal[] {
 }
 
 function pickRunRisk(trace: SkillOutput[]): SkillRisk {
-  const policyRisk = [...trace].reverse().find((entry) => entry.skill === "policy-gate");
-  if (policyRisk) {
-    return policyRisk.risk;
-  }
-
-  const latestRisk = [...trace].reverse().find((entry) => entry.risk);
-  if (latestRisk) {
-    return latestRisk.risk;
+  const latest = [...trace].reverse().find((entry) => entry.risk);
+  if (latest) {
+    return latest.risk;
   }
 
   return {
@@ -381,7 +257,6 @@ function pickRunPermissions(trace: SkillOutput[], plane: ExecutionPlane): SkillP
 
 function deriveApproved(
   status: RunRecord["status"],
-  _trace: SkillOutput[],
   policyDecision?: PolicyDecision,
 ): boolean {
   if (policyDecision?.outcome === "approved") {
@@ -421,7 +296,7 @@ function hydrateRecord(record: HydrateInput): RunRecord {
     capabilitySnapshot: record.capabilitySnapshot ?? createFallbackCapabilitySnapshot(),
     executions: record.executions ?? [],
     errors: record.errors ?? [],
-    approved: deriveApproved(record.status, record.trace, record.policyDecision),
+    approved: deriveApproved(record.status, record.policyDecision),
   };
 }
 
@@ -449,14 +324,35 @@ async function loadNormalizedRun(runId: string): Promise<RunRecord> {
   });
 }
 
-function resolveProposal(record: RunRecord, proposalName?: string): SkillProposal {
-  const proposals = record.proposals.map(normalizeProposal);
-  if (proposals.length === 0) {
+function planningRouteWithTail(route: string[], manifests: SkillManifest[]): string[] {
+  const installed = new Set(manifests.map((manifest) => manifest.name));
+  const finalRoute = [...route];
+  for (const tail of ["official-executor", "replay"]) {
+    if (installed.has(tail) && !finalRoute.includes(tail)) {
+      finalRoute.push(tail);
+    }
+  }
+  return finalRoute;
+}
+
+function proposalsFromArtifacts(artifacts: ArtifactStore): SkillProposal[] {
+  const artifact = artifacts.get<SkillProposal[]>("planning.proposals")?.data;
+  return Array.isArray(artifact) ? artifact.map(normalizeProposal) : [];
+}
+
+function resolveProposal(
+  record: RunRecord,
+  artifacts: ArtifactStore,
+  proposalName?: string,
+): SkillProposal {
+  const proposals = proposalsFromArtifacts(artifacts);
+  const fallback = proposals.length > 0 ? proposals : record.proposals.map(normalizeProposal);
+  if (fallback.length === 0) {
     throw new Error(`Run ${record.id} does not contain executable proposals.`);
   }
 
   if (proposalName) {
-    const explicit = proposals.find((proposal) => proposal.name === proposalName);
+    const explicit = fallback.find((proposal) => proposal.name === proposalName);
     if (!explicit) {
       throw new Error(`Proposal '${proposalName}' was not found in run ${record.id}.`);
     }
@@ -464,13 +360,28 @@ function resolveProposal(record: RunRecord, proposalName?: string): SkillProposa
   }
 
   if (record.selectedProposal) {
-    const selected = proposals.find((proposal) => proposal.name === record.selectedProposal);
+    const selected = fallback.find((proposal) => proposal.name === record.selectedProposal);
     if (selected) {
       return selected;
     }
   }
 
-  return proposals[0];
+  return fallback[0];
+}
+
+function extractExecutionBundle(artifacts: ArtifactStore, proposal: SkillProposal): ExecutionBundle {
+  const artifactData = artifacts.get<ExecutionBundle>("execution.intent-bundle")?.data;
+  if (artifactData && Array.isArray(artifactData.intents)) {
+    return artifactData;
+  }
+
+  const normalized = normalizeProposal(proposal);
+  return {
+    proposal: normalized.name,
+    orderPlan: normalized.orderPlan ?? [],
+    intents: normalized.intents ?? [],
+    commandPreview: (normalized.intents ?? []).map((intent) => intent.command),
+  };
 }
 
 function skippedResult(
@@ -625,9 +536,7 @@ async function executeWithRecovery(
       secondAttempt.errorCategory = secondCategory;
       results.push(secondAttempt);
       finalResults.push(secondAttempt);
-      errors.push(
-        buildRunErrorRecord(options.runId, options.proposal, intent, secondAttempt, secondCategory, 2, false),
-      );
+      errors.push(buildRunErrorRecord(options.runId, options.proposal, intent, secondAttempt, secondCategory, 2, false));
     } else {
       finalResults.push(firstAttempt);
     }
@@ -667,193 +576,181 @@ function nextStatusFromPolicy(
   return executeRequested ? "executed" : "dry_run";
 }
 
+function initialPlanStatus(policyDecision: PolicyDecision | undefined): RunStatus {
+  if (!policyDecision) {
+    return "planned";
+  }
+  if (policyDecision.outcome === "blocked") {
+    return "blocked";
+  }
+  if (policyDecision.outcome === "require_approval") {
+    return "approval_required";
+  }
+  return "ready";
+}
+
 export async function createPlan(goal: string, options: PlanOptions): Promise<RunRecord> {
   const manifests = await loadSkillRegistry();
-  const planningRoute = buildPlanningRoute(goal, manifests);
-  const route = buildRunRoute(goal, manifests);
   const runId = await createRunId();
-  const trace: SkillOutput[] = [];
   const sharedState: Record<string, unknown> = {};
-
-  for (const manifest of planningRoute) {
-    const output = await executeSkill(manifest, {
+  const artifacts = createArtifactStore(undefined, sharedState);
+  const graph = await runPlanningGraph({
+    goal,
+    manifests,
+    executeSkill,
+    context: {
       runId,
       goal,
       plane: options.plane,
       manifests,
-      trace,
+      trace: [],
+      artifacts,
       sharedState,
-    });
-
-    trace.push(output);
-  }
-
+    },
+  });
   const capabilitySnapshot = await inspectOkxEnvironment();
+  const policyDecision = artifacts.get<PolicyDecision>("policy.plan-decision")?.data;
+  const proposals = proposalsFromArtifacts(artifacts);
+  const selectedProposal = proposals[0]?.name;
+  const route = planningRouteWithTail(graph.route, manifests);
 
-  let record = hydrateRecord({
+  const record = hydrateRecord({
     kind: "trademesh-run",
     version: 1,
     id: runId,
     goal,
     plane: options.plane,
-    status: "planned",
+    status: initialPlanStatus(policyDecision),
     route,
-    trace,
-    policyDecision: undefined,
+    trace: graph.trace,
+    selectedProposal,
+    policyDecision,
     capabilitySnapshot,
     executions: [],
     errors: [],
     notes: [
       "Plan created from the local skill registry.",
+      "Planning executed through the graph-aware artifact runtime.",
       "Use apply --proposal <name> to select an execution path.",
-      "Use --approve and --execute for explicit high-risk execution.",
+      "Use --approve and --execute for explicit write execution.",
       `Initial plane: ${options.plane}`,
     ],
     createdAt: now(),
     updatedAt: now(),
   });
 
-  if (record.risk.needsApproval && options.plane !== "research") {
-    record = hydrateRecord({
-      ...record,
-      status: "approval_required",
-      updatedAt: now(),
-      notes: [...record.notes, "Run requires approval before non-research apply."],
-    });
-  }
-
   await saveRun(record);
+  await saveArtifactSnapshot(runId, artifacts.snapshot());
   return record;
 }
 
 export async function applyRun(runId: string, options: ApplyOptions): Promise<RunRecord> {
   const baseRecord = await loadNormalizedRun(runId);
   const manifests = await loadSkillRegistry();
-  const executorManifest = resolveExecutor(manifests);
+  const executorManifest = manifests.find((manifest) => manifest.name === "official-executor");
+  if (!executorManifest) {
+    throw new Error("No official-executor skill installed");
+  }
+
   const targetPlane = options.plane ?? baseRecord.plane;
+  const artifactSnapshot = await loadArtifactSnapshot(runId);
+  const sharedState: Record<string, unknown> = {};
+  const artifacts = createArtifactStore(artifactSnapshot, sharedState);
   const capabilitySnapshot = await inspectOkxEnvironment();
-
-  const record = hydrateRecord({
-    ...baseRecord,
-    plane: targetPlane,
-    capabilitySnapshot,
-    updatedAt: now(),
-  });
-
-  const proposal = resolveProposal(record, options.proposalName);
-  const plannerOutput = latestTraceEntry(record.trace, "hedge-planner");
-  const portfolioOutput = latestTraceEntry(record.trace, "portfolio-xray");
-  const selectedProposal = proposal.name;
-  const proposalIntents = proposal.intents ?? [];
-
-  const sharedState: Record<string, unknown> = {
-    selectedProposal,
-    selectedProposalIntents: proposalIntents,
-    selectedProposalOrderPlan: proposal.orderPlan,
-    selectedProposalData: proposal,
-    applyDecision: "awaiting-policy",
-    symbols: portfolioOutput?.metadata?.symbols,
-    drawdownTarget: portfolioOutput?.metadata?.drawdownTarget,
-    portfolioRiskProfile:
-      portfolioOutput?.metadata?.riskProfile ??
-      (typeof record.constraints.portfolioRiskProfile === "object"
-        ? record.constraints.portfolioRiskProfile
-        : undefined),
-    plannerRank: plannerOutput?.metadata?.ranked,
-  };
-
-  const executorOutput = await executeSkill(executorManifest, {
-    runId: record.id,
-    goal: record.goal,
-    plane: targetPlane,
-    manifests,
-    trace: record.trace,
-    sharedState,
-  });
-
-  const recordForPolicy: RunRecord = {
-    ...record,
-    plane: targetPlane,
-    permissions: {
-      ...record.permissions,
-      plane: targetPlane,
-      allowedModules:
-        targetPlane === record.permissions.plane
-          ? record.permissions.allowedModules
-          : allowedModulesForPlane(targetPlane),
-      },
-  };
-  const intents = extractExecutorIntents(executorOutput, proposalIntents);
-  const orderPlan = extractExecutorOrderPlan(executorOutput, proposal.orderPlan);
-  const proposalForPolicy: SkillProposal = {
-    ...proposal,
-    intents,
-    orderPlan,
-    requiredModules: [...new Set(intents.map((intent) => intent.module))],
-  };
-
-  const decision = evaluateApplyPolicy({
-    record: recordForPolicy,
-    proposal: proposalForPolicy,
+  const proposal = resolveProposal(baseRecord, artifacts, options.proposalName);
+  const decision = await evaluatePolicy({
+    phase: "apply",
+    artifacts,
+    proposal,
     plane: targetPlane,
     approvalProvided: Boolean(options.approve),
     executeRequested: Boolean(options.execute),
+    capabilitySnapshot,
   });
 
-  const mode = options.execute ? "execute" : "dry-run";
+  putArtifact(artifacts, {
+    key: "policy.plan-decision",
+    version: 1,
+    producer: "apply-runtime",
+    data: decision,
+    ruleRefs: decision.ruleRefs ?? [],
+    doctrineRefs: decision.doctrineRefs ?? [],
+  });
+  putArtifact(artifacts, {
+    key: "execution.apply-decision",
+    version: 1,
+    producer: "apply-runtime",
+    data: decision,
+    ruleRefs: decision.ruleRefs ?? [],
+    doctrineRefs: decision.doctrineRefs ?? [],
+  });
+
+  sharedState.selectedProposal = proposal.name;
+  sharedState.selectedProposalData = proposal;
+
+  const traceWithoutReplay = baseRecord.trace.filter((entry) => entry.skill !== "replay");
+  const executorOutput = await executeSkill(executorManifest, {
+    runId: baseRecord.id,
+    goal: baseRecord.goal,
+    plane: targetPlane,
+    manifests,
+    trace: traceWithoutReplay,
+    artifacts,
+    sharedState,
+  });
+
+  const bundle = extractExecutionBundle(artifacts, proposal);
   const blockedReason = decision.outcome === "approved" ? undefined : decision.reasons.join("; ");
   const executionOutcome =
     decision.outcome === "approved"
-      ? await executeWithRecovery(intents, {
-          runId: record.id,
-          proposal: selectedProposal,
+      ? await executeWithRecovery(bundle.intents, {
+          runId: baseRecord.id,
+          proposal: proposal.name,
           executeRequested: Boolean(options.execute),
         })
       : {
-          results: intents.map((intent) =>
+          results: bundle.intents.map((intent) =>
             skippedResult(intent, Boolean(options.execute), blockedReason ?? "blocked"),
           ),
           errors: [] as RunErrorRecord[],
-          finalResults: intents.map((intent) =>
+          finalResults: bundle.intents.map((intent) =>
             skippedResult(intent, Boolean(options.execute), blockedReason ?? "blocked"),
           ),
         };
-  const results = executionOutcome.results;
-  const runErrors = executionOutcome.errors;
-
   const executionOk = executionOutcome.finalResults.every((result) => result.ok);
   const status = nextStatusFromPolicy(decision.outcome, Boolean(options.execute), executionOk);
 
   const execution: ExecutionRecord = {
     requestedAt: now(),
-    mode,
+    mode: options.execute ? "execute" : "dry-run",
     plane: targetPlane,
-    proposal: selectedProposal,
+    proposal: proposal.name,
     approvalProvided: Boolean(options.approve),
     status,
-    results,
+    results: executionOutcome.results,
     blockedReason,
   };
 
   const nextRecord = hydrateRecord({
-    ...record,
-    status,
+    ...baseRecord,
     plane: targetPlane,
-    selectedProposal,
+    status,
+    selectedProposal: proposal.name,
     policyDecision: decision,
-    trace: [...record.trace, executorOutput],
+    trace: [...traceWithoutReplay, executorOutput],
     capabilitySnapshot,
-    executions: [...record.executions, execution],
-    errors: [...record.errors, ...runErrors],
+    executions: [...baseRecord.executions, execution],
+    errors: [...baseRecord.errors, ...executionOutcome.errors],
     notes: [
-      ...record.notes,
+      ...baseRecord.notes,
       `Apply ${status}: ${decision.reasons.join(" | ")}`,
-      ...(runErrors.length > 0 ? [`Execution errors recorded: ${runErrors.length}`] : []),
+      ...(executionOutcome.errors.length > 0 ? [`Execution errors recorded: ${executionOutcome.errors.length}`] : []),
     ],
     updatedAt: now(),
   });
 
   await saveRun(nextRecord);
+  await saveArtifactSnapshot(runId, artifacts.snapshot());
   return nextRecord;
 }
 
@@ -880,27 +777,31 @@ export async function replayRun(runId: string, options: ReplayOptions = {}): Pro
     return record;
   }
 
-  const latestExecution = record.executions.at(-1);
   const sharedState: Record<string, unknown> = {
     replaySkillFilter: options.skill,
-    runPolicyDecision: record.policyDecision,
-    latestExecutionResults: latestExecution?.results ?? [],
+    latestExecutionResults: record.executions.at(-1)?.results ?? [],
   };
+  const artifacts = createArtifactStore(await loadArtifactSnapshot(runId), sharedState);
+  const traceWithoutReplay = record.trace.filter((entry) => entry.skill !== "replay");
   const replayOutput = await executeSkill(replayManifest, {
     runId: record.id,
     goal: record.goal,
     plane: record.plane,
     manifests,
-    trace: record.trace,
+    trace: traceWithoutReplay,
+    artifacts,
     sharedState,
   });
-  const traceWithoutReplay = record.trace.filter((entry) => entry.skill !== "replay");
 
-  return hydrateRecord({
+  const nextRecord = hydrateRecord({
     ...record,
     trace: [...traceWithoutReplay, replayOutput],
     updatedAt: now(),
   });
+
+  await saveRun(nextRecord);
+  await saveArtifactSnapshot(runId, artifacts.snapshot());
+  return nextRecord;
 }
 
 interface RunListSummary {
@@ -1024,11 +925,6 @@ export function formatRunSummary(record: RunRecord): string {
 
 export function formatReplay(record: RunRecord): string {
   const replayEntry = [...record.trace].reverse().find((entry) => entry.skill === "replay");
-  const replaySkillFilterRaw = replayEntry?.metadata?.skillFilter;
-  const replaySkillFilter =
-    typeof replaySkillFilterRaw === "string" && replaySkillFilterRaw.trim().length > 0
-      ? replaySkillFilterRaw.trim().toLowerCase()
-      : null;
   const lines = [
     `Run: ${record.id}`,
     `Created: ${record.createdAt}`,
@@ -1037,7 +933,6 @@ export function formatReplay(record: RunRecord): string {
     `Plane: ${record.plane}`,
     `Goal: ${record.goal}`,
     `Approved: ${record.approved ? "yes" : "no"}`,
-    `Capability: okx=${record.capabilitySnapshot.okxCliAvailable ? "yes" : "no"} demo=${record.capabilitySnapshot.demoProfileLikelyConfigured ? "yes" : "no"} live=${record.capabilitySnapshot.liveProfileLikelyConfigured ? "yes" : "no"}`,
     "",
   ];
 
@@ -1048,68 +943,37 @@ export function formatReplay(record: RunRecord): string {
   }
 
   const replayFacts = replayEntry?.facts ?? [];
-  const topFacts = replayFacts.length > 0 ? replayFacts : record.facts;
-  if (topFacts.length > 0) {
-    lines.push(`facts: ${topFacts.join(" | ")}`);
+  if (replayFacts.length > 0) {
+    lines.push(`facts: ${replayFacts.join(" | ")}`);
   }
 
   if (record.proposals.length > 0) {
     lines.push(`proposals: ${record.proposals.map((proposal) => proposal.name).join(", ")}`);
   }
-  if (record.errors.length > 0) {
-    lines.push(`errors: ${record.errors.length}`);
-  }
 
   if (replayEntry) {
-    lines.push("");
-    lines.push("decision-chain:");
-    lines.push(...replayEntry.facts.map((fact) => `- ${fact}`));
-
     const timelineRaw = replayEntry.metadata?.timeline;
+    const artifactRaw = replayEntry.metadata?.artifacts;
+    const evidenceRaw = replayEntry.metadata?.evidence;
     if (Array.isArray(timelineRaw) && timelineRaw.length > 0) {
       lines.push("");
       lines.push("timeline:");
-      lines.push(
-        ...timelineRaw
-          .map((item) => (typeof item === "string" ? item : null))
-          .filter((item): item is string => Boolean(item))
-          .map((item) => `- ${item}`),
-      );
+      lines.push(...timelineRaw.filter((item): item is string => typeof item === "string").map((item) => `- ${item}`));
     }
-  }
-
-  lines.push("");
-
-  const detailTrace = record.trace.filter((item) => {
-    if (item.skill === "replay") {
-      return false;
+    if (Array.isArray(artifactRaw) && artifactRaw.length > 0) {
+      lines.push("");
+      lines.push("artifacts:");
+      lines.push(...artifactRaw.filter((item): item is string => typeof item === "string").map((item) => `- ${item}`));
     }
-    if (!replaySkillFilter) {
-      return true;
+    if (Array.isArray(evidenceRaw) && evidenceRaw.length > 0) {
+      lines.push("");
+      lines.push("evidence:");
+      lines.push(...evidenceRaw.filter((item): item is string => typeof item === "string").map((item) => `- ${item}`));
     }
-    return item.skill.toLowerCase() === replaySkillFilter;
-  });
-  for (const entry of detailTrace) {
-    lines.push(`[${entry.stage}] ${entry.skill}`);
-    lines.push(`summary: ${entry.summary}`);
-    lines.push(`handoff: ${entry.handoff ?? "none"}`);
-    lines.push(
-      `risk: score=${entry.risk.score} maxLoss=${entry.risk.maxLoss} needsApproval=${entry.risk.needsApproval}`,
-    );
-    if (entry.facts.length > 0) {
-      lines.push(`facts: ${entry.facts.join(" | ")}`);
-    }
-    if (entry.proposal.length > 0) {
-      lines.push(`proposal: ${entry.proposal.map((proposal) => proposal.name).join(", ")}`);
-    }
-    lines.push("");
-  }
-  if (replaySkillFilter && detailTrace.length === 0) {
-    lines.push(`No detailed trace entry matched --skill ${replaySkillFilter}.`);
-    lines.push("");
   }
 
   if (record.executions.length > 0) {
+    lines.push("");
     lines.push("executions:");
     for (const execution of record.executions) {
       lines.push(
@@ -1123,7 +987,9 @@ export function formatReplay(record: RunRecord): string {
       }
     }
   }
+
   if (record.errors.length > 0) {
+    lines.push("");
     lines.push("error-log:");
     for (const error of record.errors) {
       lines.push(

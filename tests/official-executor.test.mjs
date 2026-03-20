@@ -6,17 +6,68 @@ import { buildReferencePayloads, createContext, withMockOkx } from "./test-helpe
 test("official-executor materializes protective-put option place-order command", async () => {
   const payloads = await buildReferencePayloads();
   await withMockOkx(payloads, async () => {
+    const sharedState = {
+      selectedProposal: "protective-put",
+      proposals: [
+        {
+          name: "protective-put",
+          strategyId: "protective-put",
+          reason: "downside hedge",
+          requiredModules: ["account", "market", "option"],
+          orderPlan: [
+            {
+              kind: "option-place-order",
+              purpose: "Buy downside protection put leg.",
+              symbol: "BTC",
+              targetPremiumUsd: 220,
+              referencePx: 70_000,
+              params: {
+                instId: payloads.optionInstId,
+                side: "buy",
+                sz: "1",
+                px: "0.05",
+              },
+              strategy: "protective-put",
+              leg: "protective-put",
+              riskTags: ["instrument:option"],
+            },
+          ],
+        },
+      ],
+      policyPlanDecision: {
+        outcome: "approved",
+        reasons: ["approved for test"],
+        proposal: "protective-put",
+        plane: "demo",
+        executeRequested: false,
+        approvalProvided: true,
+        evaluatedAt: "2026-03-20T10:00:00.000Z",
+        phase: "plan",
+      },
+      tradeThesis: {
+        directionalRegime: "uptrend",
+        volState: "elevated",
+        tailRiskState: "elevated",
+        hedgeBias: "protective-put",
+        conviction: 75,
+        riskBudget: {
+          maxSingleOrderUsd: 5_000,
+          maxPremiumSpendUsd: 900,
+          maxMarginUseUsd: 3_500,
+          maxCorrelationBucketPct: 55,
+        },
+        disciplineState: "normal",
+        preferredStrategies: ["protective-put", "collar", "perp-short"],
+        decisionNotes: ["test thesis"],
+        ruleRefs: ["trend-following"],
+        doctrineRefs: ["vol-hedging"],
+      },
+    };
     const output = await run(
       createContext({
         skill: "official-executor",
         stage: "executor",
-        sharedState: {
-          selectedProposal: "protective-put",
-          selectedProposalOrderPlan: [],
-          selectedProposalIntents: [],
-          symbols: ["BTC"],
-          drawdownTarget: "4%",
-        },
+        sharedState,
       }),
     );
 

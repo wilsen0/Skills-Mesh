@@ -8,7 +8,9 @@ const CHAIN_TEMPLATES: Array<{ match: RegExp; chain: string[] }> = [
     chain: [
       "portfolio-xray",
       "market-scan",
+      "trade-thesis",
       "hedge-planner",
+      "scenario-sim",
       "policy-gate",
       "official-executor",
       "replay",
@@ -81,15 +83,15 @@ function buildDefaultPlanningRoute(goal: string, manifests: SkillManifest[]): Sk
       return normalizedLeft - normalizedRight || left.name.localeCompare(right.name);
     });
 
-  const planner = manifests
+  const planners = manifests
     .filter((manifest) => manifest.stage === "planner")
-    .sort((left, right) => triggerScore(goal, right) - triggerScore(goal, left))[0];
+    .sort((left, right) => triggerScore(goal, right) - triggerScore(goal, left) || left.name.localeCompare(right.name));
 
   const guardrails = manifests
     .filter((manifest) => manifest.stage === "guardrail")
     .sort((left, right) => left.name.localeCompare(right.name));
 
-  return [...sensors, planner, ...guardrails].filter(
+  return [...sensors, ...planners, ...guardrails].filter(
     (manifest): manifest is SkillManifest => Boolean(manifest),
   );
 }

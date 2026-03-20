@@ -1,0 +1,23 @@
+{
+  "id": "turtle-trend",
+  "name": "Turtle Trend Following",
+  "principles": [
+    "React to market state instead of predicting it",
+    "Favor systematic trend confirmation over discretion",
+    "Size risk by volatility, not conviction alone"
+  ],
+  "defaultWeights": {
+    "trend": 0.4,
+    "breakout": 0.25,
+    "volatility": 0.2,
+    "discipline": 0.15
+  },
+  "riskBias": "systematic-trend",
+  "linkedRuleIds": [
+    "ma-trend-detection",
+    "breakout-detection",
+    "atr-volatility-regime",
+    "trend-score-calc"
+  ],
+  "docPath": "docs/books/turtle-traders.md"
+}

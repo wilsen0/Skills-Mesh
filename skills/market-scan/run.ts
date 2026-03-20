@@ -1,6 +1,15 @@
-import type { SkillContext, SkillOutput } from "../../runtime/types.js";
+import { putArtifact } from "../../runtime/artifacts.js";
 import { readMarketSnapshot } from "../../runtime/okx.js";
-import { loadRules, findRule } from "../../runtime/rules-loader.js";
+import { loadDoctrineCards, loadRuleCards } from "../../runtime/rules-loader.js";
+import type {
+  MarketRegime,
+  PortfolioSnapshot,
+  SkillContext,
+  SkillOutput,
+  TrendScoreSummary,
+} from "../../runtime/types.js";
+
+type JsonRecord = Record<string, unknown>;
 
 function describeTicker(instId: string, payload: unknown): string {
   if (Array.isArray(payload)) {
@@ -13,8 +22,6 @@ function describeTicker(instId: string, payload: unknown): string {
 
   return `${instId} ticker payload loaded from okx CLI.`;
 }
-
-type JsonRecord = Record<string, unknown>;
 
 function asObject(value: unknown): JsonRecord | undefined {
   if (value && typeof value === "object" && !Array.isArray(value)) {
@@ -77,7 +84,7 @@ function extractTickerRegime(instId: string, payload: unknown): string | null {
   return `${instId} regime: range/mean-reversion (${changePct.toFixed(2)}% vs 24h open).`;
 }
 
-function extractCandleVolatility(instId: string, payload: unknown): string | null {
+function extractCandleVolatility(instId: string, payload: unknown): { note: string | null; avgAbsReturnPct: number | null } {
   const rows = unwrapDataRows(payload);
   const closes = rows
     .map((row) => {
@@ -95,7 +102,7 @@ function extractCandleVolatility(instId: string, payload: unknown): string | nul
     .slice(0, 48);
 
   if (closes.length < 2) {
-    return null;
+    return { note: null, avgAbsReturnPct: null };
   }
 
   let sumAbsReturns = 0;
@@ -110,26 +117,41 @@ function extractCandleVolatility(instId: string, payload: unknown): string | nul
 
   const avgAbsReturnPct = (sumAbsReturns / (closes.length - 1)) * 100;
   if (avgAbsReturnPct >= 2) {
-    return `${instId} candles: volatility is high (avg |ret| ${avgAbsReturnPct.toFixed(2)}% per bar).`;
+    return {
+      note: `${instId} candles: volatility is high (avg |ret| ${avgAbsReturnPct.toFixed(2)}% per bar).`,
+      avgAbsReturnPct,
+    };
   }
   if (avgAbsReturnPct >= 1) {
-    return `${instId} candles: volatility is moderate (avg |ret| ${avgAbsReturnPct.toFixed(2)}% per bar).`;
+    return {
+      note: `${instId} candles: volatility is moderate (avg |ret| ${avgAbsReturnPct.toFixed(2)}% per bar).`,
+      avgAbsReturnPct,
+    };
   }
-  return `${instId} candles: volatility is compressed (avg |ret| ${avgAbsReturnPct.toFixed(2)}% per bar).`;
+  return {
+    note: `${instId} candles: volatility is compressed (avg |ret| ${avgAbsReturnPct.toFixed(2)}% per bar).`,
+    avgAbsReturnPct,
+  };
 }
 
-function extractFundingNote(instId: string, payload: unknown): string | null {
+function extractFundingRate(payload: unknown): number | null {
   const rows = unwrapDataRows(payload);
   const first = asObject(rows[0]);
   if (!first) {
     return null;
   }
 
-  const fundingRate =
+  return (
     toNumber(first.fundingRate) ??
     toNumber(first.funding_rate) ??
-    toNumber(first.nextFundingRate);
-  if (fundingRate === undefined) {
+    toNumber(first.nextFundingRate) ??
+    null
+  );
+}
+
+function extractFundingNote(instId: string, payload: unknown): string | null {
+  const fundingRate = extractFundingRate(payload);
+  if (fundingRate === null) {
     return null;
   }
 
@@ -192,15 +214,6 @@ interface CandlePoint {
   close: number;
 }
 
-interface TrendScoreResult {
-  instId: string;
-  direction: "up" | "down" | "sideways";
-  strength: number;
-  confidence: "low" | "medium" | "high";
-  breakout: "up" | "down" | "none";
-  atrPct: number | null;
-}
-
 function parseCandles(payload: unknown): CandlePoint[] {
   const rows = unwrapDataRows(payload);
   return rows
@@ -246,7 +259,6 @@ function atr(candles: CandlePoint[], period: number): number | null {
     return null;
   }
 
-  // ATR uses chronological data for prevClose linkage.
   const chronological = [...candles].reverse();
   const trValues: number[] = [];
   for (let index = 1; index < chronological.length; index += 1) {
@@ -269,7 +281,7 @@ function atr(candles: CandlePoint[], period: number): number | null {
   return sum / recentTr.length;
 }
 
-function extractTrendScore(instId: string, payload: unknown): TrendScoreResult | null {
+function extractTrendScore(instId: string, payload: unknown): TrendScoreSummary | null {
   const candles = parseCandles(payload);
   if (candles.length < 20) {
     return null;
@@ -302,7 +314,7 @@ function extractTrendScore(instId: string, payload: unknown): TrendScoreResult |
     }
   }
 
-  let breakout: TrendScoreResult["breakout"] = "none";
+  let breakout: TrendScoreSummary["breakout"] = "none";
   if (currentClose > high20) {
     upScore += 35;
     breakout = "up";
@@ -329,9 +341,9 @@ function extractTrendScore(instId: string, payload: unknown): TrendScoreResult |
   const scoreDiff = Math.abs(upScore - downScore);
   const topScore = Math.max(upScore, downScore);
   const strength = Math.min(100, Math.max(0, topScore));
-  const direction: TrendScoreResult["direction"] =
+  const direction: TrendScoreSummary["direction"] =
     scoreDiff < 12 ? "sideways" : upScore > downScore ? "up" : "down";
-  const confidence: TrendScoreResult["confidence"] =
+  const confidence: TrendScoreSummary["confidence"] =
     strength >= 75 && scoreDiff >= 20 ? "high" : strength >= 50 && scoreDiff >= 10 ? "medium" : "low";
 
   return {
@@ -344,33 +356,85 @@ function extractTrendScore(instId: string, payload: unknown): TrendScoreResult |
   };
 }
 
+function symbolsFromContext(context: SkillContext): string[] {
+  const portfolioSnapshot = context.artifacts.get<PortfolioSnapshot>("portfolio.snapshot")?.data;
+  if (portfolioSnapshot?.symbols && portfolioSnapshot.symbols.length > 0) {
+    return portfolioSnapshot.symbols;
+  }
+
+  const raw = context.sharedState.symbols;
+  if (Array.isArray(raw)) {
+    return raw.filter((symbol): symbol is string => typeof symbol === "string");
+  }
+
+  return ["BTC", "ETH", "SOL"];
+}
+
+function overallDirection(trendScores: TrendScoreSummary[]): MarketRegime["directionalRegime"] {
+  if (trendScores.length === 0) {
+    return "sideways";
+  }
+
+  const up = trendScores.filter((score) => score.direction === "up").length;
+  const down = trendScores.filter((score) => score.direction === "down").length;
+  if (up > down) {
+    return "uptrend";
+  }
+  if (down > up) {
+    return "downtrend";
+  }
+  return "sideways";
+}
+
+function overallVolState(avgAbsReturnPct: number | null): MarketRegime["volState"] {
+  if (avgAbsReturnPct === null) {
+    return "normal";
+  }
+  if (avgAbsReturnPct >= 3) {
+    return "stress";
+  }
+  if (avgAbsReturnPct >= 1.5) {
+    return "elevated";
+  }
+  if (avgAbsReturnPct < 0.8) {
+    return "compressed";
+  }
+  return "normal";
+}
+
+function overallTailRiskState(
+  volState: MarketRegime["volState"],
+  fundingRate: number | null,
+): MarketRegime["tailRiskState"] {
+  if (volState === "stress" || (fundingRate !== null && Math.abs(fundingRate) >= 0.01)) {
+    return "stress";
+  }
+  if (volState === "elevated" || (fundingRate !== null && Math.abs(fundingRate) >= 0.005)) {
+    return "elevated";
+  }
+  return "normal";
+}
+
+function fundingStateFromRate(rate: number | null): MarketRegime["fundingState"] {
+  if (rate === null || Math.abs(rate) < 0.0005) {
+    return "neutral";
+  }
+  return rate > 0 ? "longs-paying" : "shorts-paying";
+}
+
 export default async function run(context: SkillContext): Promise<SkillOutput> {
-  const symbols = (context.sharedState.symbols as string[] | undefined) ?? ["BTC", "ETH", "SOL"];
+  const symbols = symbolsFromContext(context);
   const instIds = symbols.map((symbol) => `${symbol}-USDT`);
   const marketSnapshot = readMarketSnapshot(instIds, context.plane);
-  
-  // 从 trend-following.md 加载趋势判断规则
-  let trendRules: Record<string, unknown> = {};
-  let scoreRuleLoaded = false;
-  try {
-    const doc = await loadRules("trend-following.md");
-    const maRule = findRule(doc, "ma-trend-detection");
-    const breakoutRule = findRule(doc, "breakout-detection");
-    const atrRule = findRule(doc, "atr-volatility-regime");
-    const scoreRule = findRule(doc, "trend-score-calc");
-    
-    trendRules = {
-      loadedRules: doc.rules.map(r => r.id),
-      hasMA: !!maRule,
-      hasBreakout: !!breakoutRule,
-      hasATR: !!atrRule,
-      hasScore: !!scoreRule,
-    };
-    scoreRuleLoaded = Boolean(scoreRule);
-  } catch (error) {
-    console.error("[market-scan] Failed to load trend rules:", error);
-  }
-  
+  const ruleCards = await loadRuleCards();
+  const doctrineCards = await loadDoctrineCards();
+  const ruleRefs = ruleCards
+    .filter((rule) => rule.appliesTo.includes("market-scan"))
+    .map((rule) => rule.id);
+  const doctrineRefs = doctrineCards
+    .filter((doctrine) => doctrine.linkedRuleIds.some((ruleId) => ruleRefs.includes(ruleId)))
+    .map((doctrine) => doctrine.id);
+
   const placeholderFacts = symbols.map((symbol, index) => {
     const regimes = [
       `${symbol} realized volatility is elevated versus the recent range`,
@@ -388,9 +452,6 @@ export default async function run(context: SkillContext): Promise<SkillOutput> {
           ...Object.entries(marketSnapshot.tickers)
             .map(([instId, payload]) => extractTickerRegime(instId, payload))
             .filter((note): note is string => Boolean(note)),
-          ...Object.entries(marketSnapshot.candles)
-            .map(([instId, payload]) => extractCandleVolatility(instId, payload))
-            .filter((note): note is string => Boolean(note)),
           ...Object.entries(marketSnapshot.fundingRates)
             .map(([instId, payload]) => extractFundingNote(instId, payload))
             .filter((note): note is string => Boolean(note)),
@@ -400,9 +461,46 @@ export default async function run(context: SkillContext): Promise<SkillOutput> {
         ]
       : placeholderFacts;
 
+  const volatilityStats = Object.entries(marketSnapshot.candles)
+    .map(([instId, payload]) => ({ instId, ...extractCandleVolatility(instId, payload) }))
+    .filter((entry) => entry.note !== null);
+  marketFacts.push(...volatilityStats.map((entry) => entry.note).filter((note): note is string => Boolean(note)));
+
   const trendScores = Object.entries(marketSnapshot.candles)
     .map(([instId, payload]) => extractTrendScore(instId, payload))
-    .filter((result): result is TrendScoreResult => Boolean(result));
+    .filter((result): result is TrendScoreSummary => Boolean(result));
+  const marketVolatility =
+    volatilityStats.length > 0
+      ? volatilityStats.reduce((sum, item) => sum + (item.avgAbsReturnPct ?? 0), 0) / volatilityStats.length / 100
+      : null;
+  const primaryFundingRate = extractFundingRate(Object.values(marketSnapshot.fundingRates)[0]);
+  const regime: MarketRegime = {
+    symbols,
+    directionalRegime: overallDirection(trendScores),
+    volState: overallVolState(
+      volatilityStats.length > 0
+        ? volatilityStats.reduce((sum, item) => sum + (item.avgAbsReturnPct ?? 0), 0) / volatilityStats.length
+        : null,
+    ),
+    tailRiskState: overallTailRiskState(
+      overallVolState(
+        volatilityStats.length > 0
+          ? volatilityStats.reduce((sum, item) => sum + (item.avgAbsReturnPct ?? 0), 0) / volatilityStats.length
+          : null,
+      ),
+      primaryFundingRate,
+    ),
+    fundingState: fundingStateFromRate(primaryFundingRate),
+    conviction:
+      trendScores.length > 0
+        ? Math.round(trendScores.reduce((sum, item) => sum + item.strength, 0) / trendScores.length)
+        : 35,
+    trendScores,
+    marketVolatility,
+    ruleRefs,
+    doctrineRefs,
+  };
+
   const trendFacts = trendScores.map((result) => {
     const atrPctText = result.atrPct === null ? "n/a" : `${(result.atrPct * 100).toFixed(2)}%`;
     return `${result.instId} trend-score: ${result.direction} (strength=${result.strength}/100, confidence=${result.confidence}, breakout=${result.breakout}, atr=${atrPctText}).`;
@@ -424,9 +522,26 @@ export default async function run(context: SkillContext): Promise<SkillOutput> {
     );
   }
 
-  context.sharedState.marketFacts = marketFacts;
-  context.sharedState.marketSnapshot = marketSnapshot;
-  context.sharedState.marketTrendScores = trendScores;
+  marketFacts.push(
+    `Market regime: ${regime.directionalRegime}, vol=${regime.volState}, tailRisk=${regime.tailRiskState}, funding=${regime.fundingState}, conviction=${regime.conviction}.`,
+  );
+
+  putArtifact(context.artifacts, {
+    key: "market.snapshot",
+    version: context.manifest.artifactVersion,
+    producer: context.manifest.name,
+    data: marketSnapshot,
+    ruleRefs,
+    doctrineRefs,
+  });
+  putArtifact(context.artifacts, {
+    key: "market.regime",
+    version: context.manifest.artifactVersion,
+    producer: context.manifest.name,
+    data: regime,
+    ruleRefs,
+    doctrineRefs,
+  });
 
   return {
     skill: "market-scan",
@@ -460,14 +575,18 @@ export default async function run(context: SkillContext): Promise<SkillOutput> {
       officialWriteOnly: true,
       allowedModules: ["market"],
     },
-    handoff: "hedge-planner",
+    handoff: "trade-thesis",
+    handoffReason: "Market snapshot and normalized regime are available.",
+    producedArtifacts: ["market.snapshot", "market.regime"],
+    consumedArtifacts: ["portfolio.snapshot"],
+    ruleRefs,
+    doctrineRefs,
     metadata: {
       snapshotMode: marketSnapshot.source,
       marketCommands: marketSnapshot.commands,
       marketErrors: marketSnapshot.errors,
-      trendRules,
-      trendScoreRuleLoaded: scoreRuleLoaded,
       trendScores,
+      regime,
     },
     timestamp: new Date().toISOString(),
   };

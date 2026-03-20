@@ -1,0 +1,59 @@
+{
+  "rules": [
+    {
+      "id": "perp-short-calc",
+      "doctrineId": "vol-hedging",
+      "appliesTo": ["hedge-planner", "trade-thesis"],
+      "inputs": ["trade.thesis", "portfolio.risk-profile"],
+      "condition": { "type": "strategy" },
+      "action": { "type": "strategy-parameter", "strategyId": "perp-short", "hedgeRatio": 0.5 },
+      "priority": 100,
+      "severity": "medium",
+      "docPath": "docs/rules/hedging-strats.md"
+    },
+    {
+      "id": "protective-put-calc",
+      "doctrineId": "vol-hedging",
+      "appliesTo": ["hedge-planner", "trade-thesis"],
+      "inputs": ["trade.thesis", "portfolio.risk-profile"],
+      "condition": { "type": "strategy" },
+      "action": { "type": "strategy-parameter", "strategyId": "protective-put", "hedgeRatio": 0.8, "strikeMultiplier": 0.9 },
+      "priority": 95,
+      "severity": "medium",
+      "docPath": "docs/rules/hedging-strats.md"
+    },
+    {
+      "id": "collar-calc",
+      "doctrineId": "vol-hedging",
+      "appliesTo": ["hedge-planner", "trade-thesis"],
+      "inputs": ["trade.thesis", "portfolio.risk-profile"],
+      "condition": { "type": "strategy" },
+      "action": { "type": "strategy-parameter", "strategyId": "collar", "putStrikeMultiplier": 0.9, "callStrikeMultiplier": 1.15 },
+      "priority": 90,
+      "severity": "medium",
+      "docPath": "docs/rules/hedging-strats.md"
+    },
+    {
+      "id": "funding-rate-priority",
+      "doctrineId": "vol-hedging",
+      "appliesTo": ["trade-thesis", "hedge-planner"],
+      "inputs": ["market.regime"],
+      "condition": { "type": "funding", "threshold": 0.01 },
+      "action": { "type": "set-priority", "strategies": ["protective-put", "collar", "perp-short"] },
+      "priority": 85,
+      "severity": "medium",
+      "docPath": "docs/rules/hedging-strats.md"
+    },
+    {
+      "id": "iv-percentile-priority",
+      "doctrineId": "vol-hedging",
+      "appliesTo": ["trade-thesis", "hedge-planner"],
+      "inputs": ["market.regime"],
+      "condition": { "type": "vol-state", "state": "stress" },
+      "action": { "type": "set-priority", "strategies": ["perp-short", "collar", "protective-put"] },
+      "priority": 80,
+      "severity": "medium",
+      "docPath": "docs/rules/hedging-strats.md"
+    }
+  ]
+}

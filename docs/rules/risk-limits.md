@@ -63,7 +63,7 @@ if (marketVolatility > 0.05) {
 ### 杠杆调整
 
 ```typescript
-// 高杠杆时收紧限额
+// @rule leverage-tightening description="高杠杆收紧总敞口" threshold="5" factor="0.7"
 if (avgLeverage > 5) {
   maxTotalExposureUsd *= 0.7;
 }

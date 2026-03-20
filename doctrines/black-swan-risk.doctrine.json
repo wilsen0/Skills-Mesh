@@ -1,0 +1,23 @@
+{
+  "id": "black-swan-risk",
+  "name": "Black Swan Risk Control",
+  "principles": [
+    "Survival outranks return maximization",
+    "Tail risk must be budgeted explicitly",
+    "Correlation rises toward one during stress"
+  ],
+  "defaultWeights": {
+    "tailRisk": 0.45,
+    "concentration": 0.3,
+    "leverage": 0.25
+  },
+  "riskBias": "defensive-convexity",
+  "linkedRuleIds": [
+    "max-single-order",
+    "max-total-exposure",
+    "max-symbol-concentration",
+    "volatility-adjustment",
+    "leverage-tightening"
+  ],
+  "docPath": "docs/books/black-swan.md"
+}

@@ -1,5 +1,28 @@
 export type ExecutionPlane = "research" | "demo" | "live";
 export type SkillStage = "sensor" | "planner" | "guardrail" | "executor" | "memory";
+export type SkillRole = "sensor" | "synthesizer" | "planner" | "guardrail" | "executor" | "memory";
+export type PolicyPhase = "plan" | "apply";
+export type ScenarioName =
+  | "spot_down_5pct"
+  | "spot_down_10pct"
+  | "volatility_x2"
+  | "correlation_to_one";
+export type DoctrineId =
+  | "turtle-trend"
+  | "black-swan-risk"
+  | "vol-hedging"
+  | "discipline";
+export type ArtifactKey =
+  | "portfolio.snapshot"
+  | "portfolio.risk-profile"
+  | "market.snapshot"
+  | "market.regime"
+  | "trade.thesis"
+  | "planning.proposals"
+  | "planning.scenario-matrix"
+  | "policy.plan-decision"
+  | "execution.intent-bundle"
+  | "execution.apply-decision";
 export type RunStatus =
   | "planned"
   | "approval_required"
@@ -9,6 +32,43 @@ export type RunStatus =
   | "executed"
   | "failed"
   | "previewed";
+
+export interface ArtifactReference {
+  key: ArtifactKey;
+  producer?: string;
+  version?: number;
+}
+
+export interface ProposalEvidence {
+  artifactRefs: ArtifactReference[];
+  ruleRefs: string[];
+  doctrineRefs: string[];
+}
+
+export interface ScenarioResult {
+  scenario: ScenarioName;
+  estimatedPnlUsd: number;
+  estimatedDrawdownPct: number;
+  estimatedMarginUseUsd: number;
+  breachFlags: string[];
+}
+
+export type ScenarioMatrix = Record<ScenarioName, ScenarioResult>;
+
+export interface RiskBudget {
+  maxSingleOrderUsd: number;
+  maxPremiumSpendUsd: number;
+  maxMarginUseUsd: number;
+  maxCorrelationBucketPct: number;
+  maxTotalExposureUsd?: number;
+}
+
+export interface RiskBudgetUse {
+  orderNotionalUsd?: number;
+  premiumSpendUsd?: number;
+  marginUseUsd?: number;
+  correlationBucketPct?: number;
+}
 
 export interface OkxCommandIntent {
   command: string;
@@ -22,6 +82,7 @@ export interface SkillManifest {
   name: string;
   description: string;
   stage: SkillStage;
+  role: SkillRole;
   requires: string[];
   riskLevel: "low" | "medium" | "high";
   writes: boolean;
@@ -29,14 +90,24 @@ export interface SkillManifest {
   triggers: string[];
   entrypoint?: string;
   path: string;
+  consumes: ArtifactKey[];
+  produces: ArtifactKey[];
+  preferredHandoffs: string[];
+  repeatable: boolean;
+  artifactVersion: number;
 }
 
 export interface SkillProposal {
   name: string;
+  strategyId?: string;
   reason: string;
   estimatedCost?: string;
   estimatedProtection?: string;
   riskTags?: string[];
+  evidence?: ProposalEvidence;
+  scenarioMatrix?: ScenarioMatrix;
+  riskBudgetUse?: RiskBudgetUse;
+  decisionNotes?: string[];
   requiredModules?: string[];
   intents?: OkxCommandIntent[];
   cliIntents?: string[];
@@ -114,6 +185,18 @@ export interface CapabilitySnapshot {
   warnings: string[];
 }
 
+export interface PolicyBudgetSnapshot {
+  maxSingleOrderUsd: number;
+  maxTotalOrderUsd: number;
+  maxTotalExposureUsd: number;
+  maxMarginUseUsd: number;
+  maxPremiumSpendUsd: number;
+  maxCorrelationBucketPct: number;
+  marketVolatility: number | null;
+  volatilityAdjusted: boolean;
+  leverageAdjusted: boolean;
+}
+
 export interface PolicyDecision {
   outcome: "approved" | "require_approval" | "blocked";
   reasons: string[];
@@ -122,6 +205,11 @@ export interface PolicyDecision {
   executeRequested: boolean;
   approvalProvided: boolean;
   evaluatedAt: string;
+  phase?: PolicyPhase;
+  ruleRefs?: string[];
+  doctrineRefs?: string[];
+  breachFlags?: string[];
+  budgetSnapshot?: PolicyBudgetSnapshot;
 }
 
 export interface ExecutionResult {
@@ -163,6 +251,126 @@ export interface RunErrorRecord {
   retried: boolean;
 }
 
+export interface DirectionalExposure {
+  longUsd: number;
+  shortUsd: number;
+  netUsd: number;
+  dominantSide: "long" | "short" | "flat";
+}
+
+export interface ConcentrationTopSymbol {
+  symbol: string;
+  usd: number;
+  sharePct: number;
+}
+
+export interface ConcentrationSummary {
+  grossUsd: number;
+  topSymbol: string;
+  topSharePct: number;
+  top3: ConcentrationTopSymbol[];
+}
+
+export interface CorrelationBucket {
+  bucketId: string;
+  symbols: string[];
+  grossUsd: number;
+  sharePct: number;
+}
+
+export interface LeverageHotspot {
+  instId: string;
+  symbol: string;
+  leverage: number;
+  notionalUsd: number;
+}
+
+export interface FeeDragSummary {
+  makerRateBps?: number;
+  takerRateBps?: number;
+  recentFeePaidUsd: number;
+  recentFeeRows: number;
+}
+
+export interface PortfolioRiskProfile {
+  directionalExposure: DirectionalExposure;
+  concentration: ConcentrationSummary;
+  leverageHotspots: LeverageHotspot[];
+  feeDrag: FeeDragSummary;
+  correlationBuckets: CorrelationBucket[];
+}
+
+export interface PortfolioSnapshot {
+  source: "okx-cli" | "fallback";
+  symbols: string[];
+  drawdownTarget: string;
+  balance?: unknown;
+  positions?: unknown;
+  feeRates?: unknown;
+  bills?: unknown;
+  commands: string[];
+  errors: string[];
+  accountEquity: number;
+  availableUsd: number | null;
+}
+
+export interface TrendScoreSummary {
+  instId: string;
+  direction: "up" | "down" | "sideways";
+  strength: number;
+  confidence: "low" | "medium" | "high";
+  breakout: "up" | "down" | "none";
+  atrPct: number | null;
+}
+
+export interface MarketRegime {
+  symbols: string[];
+  directionalRegime: "uptrend" | "downtrend" | "sideways";
+  volState: "compressed" | "normal" | "elevated" | "stress";
+  tailRiskState: "normal" | "elevated" | "stress";
+  fundingState: "shorts-paying" | "neutral" | "longs-paying";
+  conviction: number;
+  trendScores: TrendScoreSummary[];
+  marketVolatility: number | null;
+  ruleRefs: string[];
+  doctrineRefs: string[];
+}
+
+export interface TradeThesis {
+  directionalRegime: "uptrend" | "downtrend" | "sideways";
+  volState: "compressed" | "normal" | "elevated" | "stress";
+  tailRiskState: "normal" | "elevated" | "stress";
+  hedgeBias: "perp" | "protective-put" | "collar" | "de-risk";
+  conviction: number;
+  riskBudget: RiskBudget;
+  disciplineState: "normal" | "cooldown" | "restricted";
+  preferredStrategies: string[];
+  decisionNotes: string[];
+  ruleRefs: string[];
+  doctrineRefs: string[];
+}
+
+export interface SkillArtifact<T = unknown> {
+  key: ArtifactKey;
+  version: number;
+  producer: string;
+  createdAt: string;
+  data: T;
+  ruleRefs: string[];
+  doctrineRefs: string[];
+}
+
+export type ArtifactSnapshot = Partial<Record<ArtifactKey, SkillArtifact<unknown>>>;
+
+export interface ArtifactStore {
+  get<T = unknown>(key: ArtifactKey): SkillArtifact<T> | undefined;
+  require<T = unknown>(key: ArtifactKey): SkillArtifact<T>;
+  has(key: ArtifactKey): boolean;
+  set<T = unknown>(artifact: SkillArtifact<T>): SkillArtifact<T>;
+  list(): SkillArtifact<unknown>[];
+  snapshot(): ArtifactSnapshot;
+}
+
 export interface SkillOutput {
   skill: string;
   stage: SkillStage;
@@ -174,6 +382,11 @@ export interface SkillOutput {
   risk: SkillRisk;
   permissions: SkillPermissions;
   handoff: string | null;
+  handoffReason?: string;
+  producedArtifacts?: ArtifactKey[];
+  consumedArtifacts?: ArtifactKey[];
+  ruleRefs?: string[];
+  doctrineRefs?: string[];
   metadata?: Record<string, unknown>;
   timestamp: string;
 }
@@ -185,6 +398,7 @@ export interface SkillContext {
   manifest: SkillManifest;
   manifests: SkillManifest[];
   trace: SkillOutput[];
+  artifacts: ArtifactStore;
   sharedState: Record<string, unknown>;
 }
 

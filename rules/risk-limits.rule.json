@@ -1,0 +1,59 @@
+{
+  "rules": [
+    {
+      "id": "max-single-order",
+      "doctrineId": "black-swan-risk",
+      "appliesTo": ["trade-thesis", "policy-gate"],
+      "inputs": ["portfolio.snapshot"],
+      "condition": { "type": "always" },
+      "action": { "type": "account-equity-multiplier", "field": "maxSingleOrderUsd", "multiplier": 0.02 },
+      "priority": 100,
+      "severity": "high",
+      "docPath": "docs/rules/risk-limits.md"
+    },
+    {
+      "id": "max-total-exposure",
+      "doctrineId": "black-swan-risk",
+      "appliesTo": ["trade-thesis", "policy-gate"],
+      "inputs": ["portfolio.snapshot"],
+      "condition": { "type": "always" },
+      "action": { "type": "account-equity-multiplier", "field": "maxTotalExposureUsd", "multiplier": 3 },
+      "priority": 95,
+      "severity": "high",
+      "docPath": "docs/rules/risk-limits.md"
+    },
+    {
+      "id": "max-symbol-concentration",
+      "doctrineId": "black-swan-risk",
+      "appliesTo": ["trade-thesis", "policy-gate"],
+      "inputs": ["portfolio.risk-profile"],
+      "condition": { "type": "always" },
+      "action": { "type": "limit", "field": "maxCorrelationBucketPct", "value": 40 },
+      "priority": 90,
+      "severity": "medium",
+      "docPath": "docs/rules/risk-limits.md"
+    },
+    {
+      "id": "volatility-adjustment",
+      "doctrineId": "black-swan-risk",
+      "appliesTo": ["trade-thesis", "policy-gate"],
+      "inputs": ["market.regime"],
+      "condition": { "type": "market-volatility", "threshold": 0.05 },
+      "action": { "type": "multiplier", "field": "maxSingleOrderUsd", "factor": 0.5 },
+      "priority": 85,
+      "severity": "high",
+      "docPath": "docs/rules/risk-limits.md"
+    },
+    {
+      "id": "leverage-tightening",
+      "doctrineId": "black-swan-risk",
+      "appliesTo": ["trade-thesis", "policy-gate"],
+      "inputs": ["portfolio.risk-profile"],
+      "condition": { "type": "avg-leverage", "threshold": 5 },
+      "action": { "type": "multiplier", "field": "maxTotalExposureUsd", "factor": 0.7 },
+      "priority": 84,
+      "severity": "high",
+      "docPath": "docs/rules/risk-limits.md"
+    }
+  ]
+}

@@ -6,16 +6,38 @@ import { buildReferencePayloads, createContext } from "./test-helpers.mjs";
 test("hedge-planner emits proposal set with structured intents/order plans", async () => {
   const payloads = await buildReferencePayloads();
   const sharedState = {
-    symbols: ["BTC"],
-    drawdownTarget: "3%",
-    accountSnapshot: {
+    portfolioSnapshot: {
       source: "okx-cli",
+      symbols: ["BTC"],
+      drawdownTarget: "3%",
       positions: payloads.accountPositions,
+      accountEquity: 50_000,
+      availableUsd: 20_000,
+      commands: [],
+      errors: [],
     },
     marketSnapshot: {
       tickers: {
         "BTC-USDT": payloads.marketTicker,
       },
+    },
+    tradeThesis: {
+      directionalRegime: "uptrend",
+      volState: "elevated",
+      tailRiskState: "elevated",
+      hedgeBias: "protective-put",
+      conviction: 71,
+      riskBudget: {
+        maxSingleOrderUsd: 5_000,
+        maxPremiumSpendUsd: 900,
+        maxMarginUseUsd: 4_000,
+        maxCorrelationBucketPct: 55,
+      },
+      disciplineState: "normal",
+      preferredStrategies: ["protective-put", "collar", "perp-short"],
+      decisionNotes: ["test thesis"],
+      ruleRefs: ["trend-following"],
+      doctrineRefs: ["turtle-trend", "vol-hedging"],
     },
     portfolioRiskProfile: {
       directionalExposure: {
@@ -45,7 +67,9 @@ test("hedge-planner emits proposal set with structured intents/order plans", asy
 
   assert.equal(output.skill, "hedge-planner");
   assert.equal(output.stage, "planner");
-  assert.equal(output.proposal.length, 3);
+  assert.equal(output.proposal.length, 4);
+  assert.equal(output.proposal[0].strategyId, "protective-put");
+  assert.ok(output.proposal[0].riskTags.includes("strategy-source:trade-thesis"));
   assert.ok(output.proposal.every((proposal) => Array.isArray(proposal.intents)));
   assert.ok(output.proposal.every((proposal) => Array.isArray(proposal.orderPlan)));
   assert.ok(Array.isArray(sharedState.proposals));

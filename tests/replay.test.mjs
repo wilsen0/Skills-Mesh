@@ -87,6 +87,34 @@ async function writeReplayFixture(runId) {
       2,
     ),
   );
+
+  await writeFile(
+    join(runDir, "artifacts.json"),
+    JSON.stringify(
+      {
+        "portfolio.snapshot": {
+          key: "portfolio.snapshot",
+          version: 1,
+          producer: "portfolio-xray",
+          createdAt: "2026-03-20T09:00:00.000Z",
+          data: { symbols: ["BTC"] },
+          ruleRefs: [],
+          doctrineRefs: [],
+        },
+        "policy.plan-decision": {
+          key: "policy.plan-decision",
+          version: 1,
+          producer: "policy-gate",
+          createdAt: "2026-03-20T09:02:00.000Z",
+          data: { outcome: "approved" },
+          ruleRefs: ["risk-limits"],
+          doctrineRefs: ["discipline"],
+        },
+      },
+      null,
+      2,
+    ),
+  );
 }
 
 test("replay summarizes sensor/planner/policy/executor chain from trace.json", async () => {
@@ -104,11 +132,12 @@ test("replay summarizes sensor/planner/policy/executor chain from trace.json", a
     );
 
     assert.equal(output.skill, "replay");
-    assert.ok(output.facts.some((fact) => fact.startsWith("Sensors triggered:")));
-    assert.ok(output.facts.some((fact) => fact.startsWith("Planner proposals:")));
+    assert.ok(output.facts.some((fact) => fact.startsWith("Replay entries:")));
+    assert.ok(output.facts.some((fact) => fact.startsWith("Artifacts captured:")));
     assert.ok(output.facts.some((fact) => fact.startsWith("Policy decisions:")));
-    assert.ok(output.facts.some((fact) => fact.startsWith("Executor actions:")));
+    assert.ok(output.facts.some((fact) => fact.startsWith("Executions recorded:")));
     assert.equal(output.constraints.timelineLength, 4);
+    assert.ok(Array.isArray(output.metadata?.artifacts));
   } finally {
     await rm(runDir, { recursive: true, force: true });
   }

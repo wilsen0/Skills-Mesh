@@ -1,7 +1,7 @@
 import { existsSync, promises as fs } from "node:fs";
 import { join } from "node:path";
 import { getProjectPaths } from "./paths.js";
-import type { RunErrorRecord, RunRecord, SkillOutput } from "./types.js";
+import type { ArtifactSnapshot, RunErrorRecord, RunRecord, SkillOutput } from "./types.js";
 
 export interface TraceEnvelope {
   runId: string;
@@ -14,6 +14,11 @@ export interface TraceEnvelope {
   executions: RunRecord["executions"];
   errors: RunErrorRecord[];
   policyDecision?: RunRecord["policyDecision"];
+}
+
+export interface ExecutionEnvelope {
+  executions: RunRecord["executions"];
+  errors: RunErrorRecord[];
 }
 
 function timestampPrefix(date = new Date()): string {
@@ -77,6 +82,16 @@ export async function saveRun(record: RunRecord): Promise<void> {
   const tracePath = join(runDir, "trace.json");
   const envelope = buildTraceEnvelope(record);
   await fs.writeFile(tracePath, `${JSON.stringify(envelope, null, 2)}\n`, "utf8");
+
+  const policyPath = join(runDir, "policy.json");
+  await fs.writeFile(policyPath, `${JSON.stringify(record.policyDecision ?? null, null, 2)}\n`, "utf8");
+
+  const executionPath = join(runDir, "executions.json");
+  await fs.writeFile(
+    executionPath,
+    `${JSON.stringify({ executions: record.executions, errors: record.errors ?? [] }, null, 2)}\n`,
+    "utf8",
+  );
 }
 
 export async function loadRun(runId: string): Promise<RunRecord> {
@@ -118,6 +133,39 @@ export async function loadTraceEnvelope(runId: string): Promise<TraceEnvelope | 
   } catch {
     return null;
   }
+}
+
+export async function saveArtifactSnapshot(runId: string, snapshot: ArtifactSnapshot): Promise<void> {
+  const runDir = await ensureMeshRunDirectory(runId);
+  const artifactPath = join(runDir, "artifacts.json");
+  await fs.writeFile(artifactPath, `${JSON.stringify(snapshot, null, 2)}\n`, "utf8");
+}
+
+export async function loadArtifactSnapshot(runId: string): Promise<ArtifactSnapshot> {
+  const { meshRunsRoot } = getProjectPaths();
+  const artifactPath = join(meshRunsRoot, runId, "artifacts.json");
+  if (!existsSync(artifactPath)) {
+    return {};
+  }
+
+  const contents = await fs.readFile(artifactPath, "utf8");
+  const parsed = JSON.parse(contents) as ArtifactSnapshot;
+  return parsed && typeof parsed === "object" ? parsed : {};
+}
+
+export async function loadExecutionEnvelope(runId: string): Promise<ExecutionEnvelope | null> {
+  const { meshRunsRoot } = getProjectPaths();
+  const executionPath = join(meshRunsRoot, runId, "executions.json");
+  if (!existsSync(executionPath)) {
+    return null;
+  }
+
+  const contents = await fs.readFile(executionPath, "utf8");
+  const parsed = JSON.parse(contents) as Partial<ExecutionEnvelope>;
+  return {
+    executions: Array.isArray(parsed.executions) ? parsed.executions : [],
+    errors: Array.isArray(parsed.errors) ? parsed.errors : [],
+  };
 }
 
 export async function loadTraceEntries(runId: string): Promise<SkillOutput[]> {

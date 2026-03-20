@@ -2,7 +2,7 @@ import { existsSync, promises as fs } from "node:fs";
 import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { getProjectPaths } from "./paths.js";
-import type { SkillHandler, SkillManifest } from "./types.js";
+import type { ArtifactKey, SkillHandler, SkillManifest, SkillRole } from "./types.js";
 
 type FrontmatterValue = string | number | boolean | string[];
 
@@ -81,19 +81,41 @@ function parseListValue(value: FrontmatterValue | undefined): string[] {
   return [];
 }
 
+function defaultRoleForStage(stage: SkillManifest["stage"]): SkillRole {
+  if (stage === "sensor") {
+    return "sensor";
+  }
+  if (stage === "planner") {
+    return "planner";
+  }
+  if (stage === "guardrail") {
+    return "guardrail";
+  }
+  if (stage === "executor") {
+    return "executor";
+  }
+  return "memory";
+}
+
 function normalizeManifest(path: string, fields: Record<string, FrontmatterValue>): SkillManifest {
   const name = typeof fields.name === "string" ? fields.name : "";
   if (!name) {
     throw new Error(`Skill manifest missing name: ${path}`);
   }
 
+  const stage =
+    typeof fields.stage === "string"
+      ? (fields.stage as SkillManifest["stage"])
+      : "sensor";
+
   return {
     name,
     description: typeof fields.description === "string" ? fields.description : "",
-    stage:
-      typeof fields.stage === "string"
-        ? (fields.stage as SkillManifest["stage"])
-        : "sensor",
+    stage,
+    role:
+      typeof fields.role === "string"
+        ? (fields.role as SkillRole)
+        : defaultRoleForStage(stage),
     requires: parseListValue(fields.requires),
     riskLevel:
       typeof fields.risk_level === "string"
@@ -103,6 +125,16 @@ function normalizeManifest(path: string, fields: Record<string, FrontmatterValue
     alwaysOn: Boolean(fields.always_on),
     triggers: parseListValue(fields.triggers),
     entrypoint: typeof fields.entrypoint === "string" ? fields.entrypoint : undefined,
+    consumes: parseListValue(fields.consumes) as ArtifactKey[],
+    produces: parseListValue(fields.produces) as ArtifactKey[],
+    preferredHandoffs: parseListValue(fields.preferred_handoffs),
+    repeatable: Boolean(fields.repeatable),
+    artifactVersion:
+      typeof fields.artifact_version === "number"
+        ? fields.artifact_version
+        : typeof fields.artifact_version === "string"
+          ? Number(fields.artifact_version)
+          : 1,
     path,
   };
 }

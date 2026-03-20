@@ -1,6 +1,7 @@
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { createArtifactStore } from "../dist/runtime/artifacts.js";
 
 const REFERENCE_RUN_PATH = join(process.cwd(), "参考内容", "example_demo_run.json");
 
@@ -138,6 +139,7 @@ export function createContext({
   sharedState = {},
   trace = [],
 } = {}) {
+  const artifacts = createArtifactStore(undefined, sharedState);
   return {
     runId,
     goal,
@@ -146,16 +148,32 @@ export function createContext({
       name: skill,
       description: `${skill} test manifest`,
       stage,
+      role:
+        stage === "sensor"
+          ? "sensor"
+          : stage === "planner"
+            ? "planner"
+            : stage === "guardrail"
+              ? "guardrail"
+              : stage === "executor"
+                ? "executor"
+                : "memory",
       requires: [],
       riskLevel: "low",
       writes: false,
       alwaysOn: false,
       triggers: [],
       entrypoint: "./run.js",
+      consumes: [],
+      produces: [],
+      preferredHandoffs: [],
+      repeatable: false,
+      artifactVersion: 1,
       path: "tests",
     },
     manifests: [],
     trace,
+    artifacts,
     sharedState,
   };
 }

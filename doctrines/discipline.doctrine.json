@@ -1,0 +1,17 @@
+{
+  "id": "discipline",
+  "name": "Execution Discipline",
+  "principles": [
+    "Escalate review after repeated overrides or losses",
+    "Do not widen risk budgets under stress",
+    "Cooldown is a first-class control, not a note"
+  ],
+  "defaultWeights": {
+    "cooldown": 0.5,
+    "overridePenalty": 0.3,
+    "lossStreakPenalty": 0.2
+  },
+  "riskBias": "discipline-first",
+  "linkedRuleIds": [],
+  "docPath": "docs/books/discipline.md"
+}

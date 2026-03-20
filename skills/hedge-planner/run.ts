@@ -1,70 +1,50 @@
 import { createCommandIntent } from "../../runtime/okx.js";
-import { loadRules, findRule, findTableRow } from "../../runtime/rules-loader.js";
+import { putArtifact } from "../../runtime/artifacts.js";
 import type {
-  OkxCommandIntent,
+  MarketRegime,
+  OptionOrderPlanStep,
+  OptionPlaceOrderParams,
+  PortfolioRiskProfile,
   SkillContext,
   SkillOutput,
   SkillProposal,
   SwapOrderPlanStep,
   SwapPlaceOrderParams,
+  TradeThesis,
 } from "../../runtime/types.js";
 
-const DEFAULT_SYMBOLS = ["BTC", "ETH", "SOL"];
-const DEFAULT_PRICE_BY_SYMBOL: Record<string, number> = {
+const DEFAULT_SYMBOL = "BTC";
+const FALLBACK_PRICE_BY_SYMBOL: Record<string, number> = {
   BTC: 70_000,
   ETH: 3_500,
   SOL: 150,
 };
-const MIN_NOTIONAL_USD = 25;
-const DEFAULT_STRATEGY_PRIORITY = ["perp-short", "protective-put", "collar"] as const;
-type HedgeStrategy = (typeof DEFAULT_STRATEGY_PRIORITY)[number];
-const STRATEGY_TO_PROPOSAL: Record<HedgeStrategy, string> = {
-  "perp-short": "directional-net-hedge",
-  "protective-put": "deleverage-first",
-  collar: "diversified-hedge",
-};
+const STRATEGIES = ["perp-short", "protective-put", "collar", "de-risk"] as const;
+type StrategyId = (typeof STRATEGIES)[number];
 
 type JsonRecord = Record<string, unknown>;
 
-interface DirectionalExposure {
-  longUsd: number;
-  shortUsd: number;
-  netUsd: number;
-  dominantSide: "long" | "short" | "flat";
+function asObject(value: unknown): JsonRecord | undefined {
+  if (value && typeof value === "object" && !Array.isArray(value)) {
+    return value as JsonRecord;
+  }
+
+  return undefined;
 }
 
-interface ConcentrationTopSymbol {
-  symbol: string;
-  usd: number;
-  sharePct: number;
-}
+function toNumber(value: unknown): number | undefined {
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return value;
+  }
 
-interface ConcentrationSummary {
-  grossUsd: number;
-  topSymbol: string;
-  topSharePct: number;
-  top3: ConcentrationTopSymbol[];
-}
+  if (typeof value === "string") {
+    const parsed = Number(value.replace(/,/g, "").trim());
+    if (Number.isFinite(parsed)) {
+      return parsed;
+    }
+  }
 
-interface LeverageHotspot {
-  instId: string;
-  symbol: string;
-  leverage: number;
-  notionalUsd: number;
-}
-
-interface PortfolioRiskProfile {
-  directionalExposure: DirectionalExposure;
-  concentration: ConcentrationSummary;
-  leverageHotspots: LeverageHotspot[];
-}
-
-interface MarketSnapshotLike {
-  tickers?: Record<string, unknown>;
-}
-
-interface AccountSnapshotLike {
-  positions?: unknown;
+  return undefined;
 }
 
 function buildPlaneFlagArgs(plane: SkillContext["plane"]): string[] {
@@ -77,73 +57,6 @@ function buildPlaneFlagArgs(plane: SkillContext["plane"]): string[] {
   }
 
   return ["--json"];
-}
-
-function asObject(value: unknown): JsonRecord | undefined {
-  if (value && typeof value === "object" && !Array.isArray(value)) {
-    return value as JsonRecord;
-  }
-  return undefined;
-}
-
-function asObjectArray(value: unknown): JsonRecord[] {
-  if (Array.isArray(value)) {
-    return value
-      .map((entry) => asObject(entry))
-      .filter((entry): entry is JsonRecord => Boolean(entry));
-  }
-
-  const objectValue = asObject(value);
-  if (!objectValue) {
-    return [];
-  }
-
-  const data = objectValue.data;
-  if (!Array.isArray(data)) {
-    return [];
-  }
-
-  return data
-    .map((entry) => asObject(entry))
-    .filter((entry): entry is JsonRecord => Boolean(entry));
-}
-
-function toNumber(value: unknown): number | undefined {
-  if (typeof value === "number" && Number.isFinite(value)) {
-    return value;
-  }
-
-  if (typeof value === "string") {
-    const trimmed = value.replace(/,/g, "").trim();
-    if (!trimmed) {
-      return undefined;
-    }
-
-    const parsed = Number(trimmed);
-    if (Number.isFinite(parsed)) {
-      return parsed;
-    }
-  }
-
-  return undefined;
-}
-
-function toString(value: unknown): string | undefined {
-  if (typeof value === "string" && value.trim().length > 0) {
-    return value.trim();
-  }
-  return undefined;
-}
-
-function clamp(value: number, min: number, max: number): number {
-  return Math.min(Math.max(value, min), max);
-}
-
-function roundDown(value: number, step: number): number {
-  if (step <= 0) {
-    return value;
-  }
-  return Math.floor(value / step) * step;
 }
 
 function sizeStepForSymbol(symbol: string): number {
@@ -159,217 +72,80 @@ function sizeStepForSymbol(symbol: string): number {
   return 1;
 }
 
-function sizePrecisionForStep(step: number): number {
-  const asText = step.toString();
-  const decimalIndex = asText.indexOf(".");
-  return decimalIndex === -1 ? 0 : asText.length - decimalIndex - 1;
-}
-
-function formatSize(size: number, step: number): string {
-  const adjusted = roundDown(size, step);
-  const precision = sizePrecisionForStep(step);
-  return adjusted.toFixed(precision);
-}
-
-function pricePrecision(px: number): number {
-  if (px >= 10_000) {
-    return 1;
-  }
-  if (px >= 1_000) {
-    return 2;
-  }
-  if (px >= 10) {
-    return 3;
-  }
-  return 4;
+function formatWithStep(value: number, step: number): string {
+  const rounded = Math.floor(value / step) * step;
+  const decimals = step.toString().includes(".") ? step.toString().split(".")[1].length : 0;
+  return rounded.toFixed(decimals);
 }
 
 function formatPrice(px: number): string {
-  return px.toFixed(pricePrecision(px));
+  if (px >= 10_000) {
+    return px.toFixed(1);
+  }
+  if (px >= 1_000) {
+    return px.toFixed(2);
+  }
+  if (px >= 10) {
+    return px.toFixed(3);
+  }
+  return px.toFixed(4);
 }
 
-function parseDrawdownTargetPct(drawdownTarget: string): number {
-  const match = drawdownTarget.match(/(\d+(\.\d+)?)/);
-  if (!match) {
-    return 4;
+function formatOptionPrice(px: number): string {
+  if (px >= 1) {
+    return px.toFixed(3);
   }
-  const parsed = Number(match[1]);
-  return Number.isFinite(parsed) ? parsed : 4;
+  return px.toFixed(4);
 }
 
-function hedgeRatioFromDrawdownTarget(drawdownTargetPct: number): number {
-  if (drawdownTargetPct <= 3) {
-    return 0.75;
-  }
-  if (drawdownTargetPct <= 5) {
-    return 0.6;
-  }
-  if (drawdownTargetPct <= 8) {
-    return 0.45;
-  }
-  return 0.35;
+function nextFridayYymmdd(base = new Date()): string {
+  const date = new Date(base.getTime());
+  const distance = ((5 - date.getUTCDay() + 7) % 7) || 7;
+  date.setUTCDate(date.getUTCDate() + distance);
+  const year = date.getUTCFullYear().toString().slice(-2);
+  const month = String(date.getUTCMonth() + 1).padStart(2, "0");
+  const day = String(date.getUTCDate()).padStart(2, "0");
+  return `${year}${month}${day}`;
 }
 
-function symbolFromInstId(instId: string): string {
-  return instId.split("-")[0] ?? instId;
+function normalizeStrike(referencePx: number, multiplier: number): number {
+  const target = Math.max(1, referencePx * multiplier);
+  const step = target >= 50_000 ? 1_000 : target >= 10_000 ? 500 : target >= 1_000 ? 100 : 10;
+  return Math.round(target / step) * step;
 }
 
-function normalizeSwapInstId(instId: string, symbol: string): string {
-  if (instId.endsWith("-SWAP")) {
-    return instId;
-  }
-
-  if (instId.includes("-USDT-")) {
-    return instId;
-  }
-
-  return `${symbol}-USDT-SWAP`;
-}
-
-function unwrapDataRows(payload: unknown): unknown[] {
-  if (Array.isArray(payload)) {
-    return payload;
-  }
-
-  const objectPayload = asObject(payload);
-  if (!objectPayload) {
-    return [];
-  }
-
-  const data = objectPayload.data;
-  if (Array.isArray(data)) {
-    return data;
-  }
-
-  return [];
-}
-
-function extractTickerLastPrice(payload: unknown): number | undefined {
-  const rows = unwrapDataRows(payload);
-  const first = asObject(rows[0]);
-  if (!first) {
-    return undefined;
-  }
-
+function readLastPrice(marketSnapshot: unknown, symbol: string): number {
+  const snapshot = asObject(marketSnapshot);
+  const tickers = asObject(snapshot?.tickers);
+  const ticker = asObject(tickers?.[`${symbol}-USDT`]);
+  const data = Array.isArray(ticker?.data) ? ticker?.data : [];
+  const first = asObject(data[0]);
   return (
-    toNumber(first.last) ??
-    toNumber(first.lastPx) ??
-    toNumber(first.markPx) ??
-    toNumber(first.idxPx) ??
-    toNumber(first.close)
+    toNumber(first?.last) ??
+    toNumber(first?.lastPx) ??
+    toNumber(first?.markPx) ??
+    FALLBACK_PRICE_BY_SYMBOL[symbol] ??
+    1
   );
 }
 
-function resolveReferencePrice(symbol: string, marketSnapshot?: MarketSnapshotLike): number {
-  const tickerPayload = marketSnapshot?.tickers?.[`${symbol}-USDT`];
-  const parsed = extractTickerLastPrice(tickerPayload);
-  if (parsed !== undefined && parsed > 0) {
-    return parsed;
-  }
-
-  return DEFAULT_PRICE_BY_SYMBOL[symbol] ?? 1;
-}
-
-function parseRiskProfile(raw: unknown): PortfolioRiskProfile {
-  const objectRaw = asObject(raw);
-
-  const directionalRaw = asObject(objectRaw?.directionalExposure);
-  const netUsd = toNumber(directionalRaw?.netUsd) ?? 0;
-  const dominantSideRaw = toString(directionalRaw?.dominantSide);
-  const dominantSide: "long" | "short" | "flat" =
-    dominantSideRaw === "long" || dominantSideRaw === "short" || dominantSideRaw === "flat"
-      ? dominantSideRaw
-      : netUsd > 0
-        ? "long"
-        : netUsd < 0
-          ? "short"
-          : "flat";
-
-  const concentrationRaw = asObject(objectRaw?.concentration);
-  const top3Raw = Array.isArray(concentrationRaw?.top3) ? concentrationRaw.top3 : [];
-  const top3 = top3Raw
-    .map((entry) => asObject(entry))
-    .filter((entry): entry is JsonRecord => Boolean(entry))
-    .map((entry) => ({
-      symbol: toString(entry.symbol) ?? "UNKNOWN",
-      usd: Math.max(0, toNumber(entry.usd) ?? 0),
-      sharePct: clamp(toNumber(entry.sharePct) ?? 0, 0, 100),
-    }))
-    .filter((entry) => entry.symbol !== "UNKNOWN");
-
-  const hotspotsRaw = Array.isArray(objectRaw?.leverageHotspots) ? objectRaw?.leverageHotspots : [];
-  const leverageHotspots = hotspotsRaw
-    .map((entry) => asObject(entry))
-    .filter((entry): entry is JsonRecord => Boolean(entry))
-    .map((entry) => {
-      const instId = toString(entry.instId) ?? "";
-      const symbol = toString(entry.symbol) ?? symbolFromInstId(instId);
-      const leverage = toNumber(entry.leverage) ?? toNumber(entry.lever) ?? 0;
-      const notionalUsd = Math.max(0, toNumber(entry.notionalUsd) ?? 0);
-      return { instId, symbol, leverage, notionalUsd };
-    })
-    .filter((entry) => entry.instId && entry.symbol && entry.leverage > 0 && entry.notionalUsd > 0)
-    .sort((left, right) => right.leverage - left.leverage);
-
-  return {
-    directionalExposure: {
-      longUsd: Math.max(0, toNumber(directionalRaw?.longUsd) ?? 0),
-      shortUsd: Math.max(0, toNumber(directionalRaw?.shortUsd) ?? 0),
-      netUsd,
-      dominantSide,
-    },
-    concentration: {
-      grossUsd: Math.max(0, toNumber(concentrationRaw?.grossUsd) ?? 0),
-      topSymbol: toString(concentrationRaw?.topSymbol) ?? "n/a",
-      topSharePct: clamp(toNumber(concentrationRaw?.topSharePct) ?? 0, 0, 100),
-      top3,
-    },
-    leverageHotspots,
-  };
-}
-
-function parsePositionRows(accountSnapshot?: AccountSnapshotLike): JsonRecord[] {
-  if (!accountSnapshot) {
-    return [];
-  }
-  return asObjectArray(accountSnapshot.positions);
-}
-
-function buildPositionSideLookup(accountSnapshot?: AccountSnapshotLike): Map<string, "long" | "short"> {
-  const rows = parsePositionRows(accountSnapshot);
-  const lookup = new Map<string, "long" | "short">();
-
-  for (const row of rows) {
-    const instId = toString(row.instId);
-    if (!instId) {
-      continue;
-    }
-
-    const sideHint = toString(row.posSide)?.toLowerCase();
-    const positionSize = toNumber(row.pos) ?? toNumber(row.sz) ?? 0;
-    const side: "long" | "short" =
-      sideHint === "short" ? "short" : sideHint === "long" ? "long" : positionSize < 0 ? "short" : "long";
-
-    lookup.set(instId, side);
-  }
-
-  return lookup;
-}
-
-function choosePrimarySymbol(symbols: string[], profile: PortfolioRiskProfile): string {
+function choosePrimarySymbol(profile: PortfolioRiskProfile): string {
   if (profile.concentration.topSymbol && profile.concentration.topSymbol !== "n/a") {
     return profile.concentration.topSymbol;
   }
+
   if (profile.leverageHotspots.length > 0) {
     return profile.leverageHotspots[0].symbol;
   }
-  return symbols[0] ?? "BTC";
+
+  if (profile.correlationBuckets.length > 0 && profile.correlationBuckets[0].symbols.length > 0) {
+    return profile.correlationBuckets[0].symbols[0] ?? DEFAULT_SYMBOL;
+  }
+
+  return DEFAULT_SYMBOL;
 }
 
-function buildSwapPlaceOrderCommand(
-  params: SwapPlaceOrderParams,
-  plane: SkillContext["plane"],
-): string {
+function buildSwapCommand(params: SwapPlaceOrderParams, plane: SkillContext["plane"]): string {
   const args = [
     "okx",
     "swap",
@@ -392,23 +168,11 @@ function buildSwapPlaceOrderCommand(
   if (params.reduceOnly !== undefined) {
     args.push("--reduceOnly", String(params.reduceOnly));
   }
-  if (params.posSide) {
-    args.push("--posSide", params.posSide);
-  }
   if (params.tpTriggerPx) {
-    args.push("--tpTriggerPx", params.tpTriggerPx);
-  }
-  if (params.tpOrdPx) {
-    args.push("--tpOrdPx", params.tpOrdPx);
+    args.push("--tpTriggerPx", params.tpTriggerPx, "--tpOrdPx", params.tpOrdPx ?? "-1");
   }
   if (params.slTriggerPx) {
-    args.push("--slTriggerPx", params.slTriggerPx);
-  }
-  if (params.slOrdPx) {
-    args.push("--slOrdPx", params.slOrdPx);
-  }
-  if (params.clOrdId) {
-    args.push("--clOrdId", params.clOrdId);
+    args.push("--slTriggerPx", params.slTriggerPx, "--slOrdPx", params.slOrdPx ?? "-1");
   }
   if (params.tag) {
     args.push("--tag", params.tag);
@@ -418,438 +182,440 @@ function buildSwapPlaceOrderCommand(
   return args.join(" ");
 }
 
-function toSwapIntent(step: SwapOrderPlanStep, plane: SkillContext["plane"]): OkxCommandIntent {
-  return createCommandIntent(buildSwapPlaceOrderCommand(step.params, plane), {
-    module: "swap",
-    requiresWrite: true,
-    reason: step.purpose,
-  });
+function buildOptionCommand(params: OptionPlaceOrderParams, plane: SkillContext["plane"]): string {
+  return [
+    "okx",
+    "option",
+    "place-order",
+    "--instId",
+    params.instId,
+    "--side",
+    params.side,
+    "--sz",
+    params.sz,
+    "--px",
+    params.px,
+    ...buildPlaneFlagArgs(plane),
+  ].join(" ");
 }
 
-function buildReadIntents(symbols: string[], plane: SkillContext["plane"]): OkxCommandIntent[] {
+function buildReadIntents(symbol: string, plane: SkillContext["plane"]) {
   const flags = buildPlaneFlagArgs(plane).join(" ");
-  const intents: OkxCommandIntent[] = [
+  return [
     createCommandIntent(`okx account balance ${flags}`, {
       module: "account",
       requiresWrite: false,
-      reason: "Read balances before final hedge sizing.",
+      reason: "Refresh balances before hedge execution.",
     }),
     createCommandIntent(`okx account positions ${flags}`, {
       module: "account",
       requiresWrite: false,
-      reason: "Read positions before applying hedge orders.",
+      reason: "Refresh positions before hedge execution.",
+    }),
+    createCommandIntent(`okx market ticker ${symbol}-USDT ${flags}`, {
+      module: "market",
+      requiresWrite: false,
+      reason: `Refresh ${symbol} price before hedge execution.`,
     }),
   ];
-
-  for (const symbol of symbols) {
-    intents.push(
-      createCommandIntent(`okx market ticker ${symbol}-USDT ${flags}`, {
-        module: "market",
-        requiresWrite: false,
-        reason: `Read ${symbol} spot ticker for final order price reference.`,
-      }),
-    );
-  }
-
-  return intents;
 }
 
-function leverageReductionRatio(leverage: number): number {
-  if (leverage >= 10) {
-    return 0.4;
-  }
-  if (leverage >= 6) {
-    return 0.3;
-  }
-  return 0.2;
-}
-
-function sideForDirectionalNet(netUsd: number): "buy" | "sell" | null {
-  if (netUsd > 0) {
-    return "sell";
-  }
-  if (netUsd < 0) {
-    return "buy";
-  }
-  return null;
-}
-
-function makeSwapStep(
-  options: {
-    symbol: string;
-    side: "buy" | "sell";
-    targetNotionalUsd: number;
-    referencePx: number;
-    instId?: string;
-    reduceOnly?: boolean;
-    purpose: string;
-    riskTags?: string[];
-    orderTag: string;
-  },
-): SwapOrderPlanStep | null {
-  if (options.targetNotionalUsd < MIN_NOTIONAL_USD || options.referencePx <= 0) {
+function makeSwapStep(input: {
+  symbol: string;
+  side: "buy" | "sell";
+  notionalUsd: number;
+  referencePx: number;
+  reduceOnly?: boolean;
+  purpose: string;
+  riskTags: string[];
+  tag: string;
+}): SwapOrderPlanStep | null {
+  if (input.notionalUsd <= 0 || input.referencePx <= 0) {
     return null;
   }
 
-  const stepSize = sizeStepForSymbol(options.symbol);
-  const rawSize = options.targetNotionalUsd / options.referencePx;
-  const formattedSize = formatSize(rawSize, stepSize);
-  if (toNumber(formattedSize) === 0) {
+  const step = sizeStepForSymbol(input.symbol);
+  const size = input.notionalUsd / input.referencePx;
+  const formattedSize = formatWithStep(size, step);
+  if (Number(formattedSize) <= 0) {
     return null;
   }
 
-  const priceOffsetBps = 7;
-  const priceMultiplier = options.side === "sell" ? 1 - priceOffsetBps / 10_000 : 1 + priceOffsetBps / 10_000;
-  const limitPx = formatPrice(options.referencePx * priceMultiplier);
-  const params: SwapPlaceOrderParams = {
-    instId: options.instId ?? `${options.symbol}-USDT-SWAP`,
-    tdMode: "cross",
-    side: options.side,
-    ordType: "limit",
-    sz: formattedSize,
-    px: limitPx,
-    reduceOnly: options.reduceOnly ?? false,
-    tag: options.orderTag,
-  };
+  const entryPx =
+    input.side === "sell"
+      ? input.referencePx * 0.999
+      : input.referencePx * 1.001;
 
   return {
     kind: "swap-place-order",
-    purpose: options.purpose,
-    symbol: options.symbol,
-    targetNotionalUsd: options.targetNotionalUsd,
-    referencePx: options.referencePx,
-    params,
-    riskTags: options.riskTags,
+    purpose: input.purpose,
+    symbol: input.symbol,
+    targetNotionalUsd: input.notionalUsd,
+    referencePx: input.referencePx,
+    params: {
+      instId: `${input.symbol}-USDT-SWAP`,
+      tdMode: "cross",
+      side: input.side,
+      ordType: "limit",
+      sz: formattedSize,
+      px: formatPrice(entryPx),
+      reduceOnly: input.reduceOnly ?? false,
+      tag: input.tag,
+    },
+    riskTags: input.riskTags,
   };
+}
+
+function makeOptionStep(input: {
+  symbol: string;
+  referencePx: number;
+  premiumUsd: number;
+  side: "buy" | "sell";
+  right: "P" | "C";
+  purpose: string;
+  strategy: "protective-put" | "collar";
+  leg: "protective-put" | "covered-call";
+  multiplier: number;
+  riskTags: string[];
+}): OptionOrderPlanStep {
+  const contractPx = Math.max(0.01, input.premiumUsd / Math.max(input.referencePx, 1));
+  return {
+    kind: "option-place-order",
+    purpose: input.purpose,
+    symbol: input.symbol,
+    targetPremiumUsd: input.premiumUsd,
+    referencePx: input.referencePx,
+    params: {
+      instId: `${input.symbol}-USD-${nextFridayYymmdd()}-${normalizeStrike(input.referencePx, input.multiplier)}-${input.right}`,
+      side: input.side,
+      sz: "1",
+      px: formatOptionPrice(contractPx),
+    },
+    strategy: input.strategy,
+    leg: input.leg,
+    riskTags: input.riskTags,
+  };
+}
+
+function preferredStrategies(thesis: TradeThesis): StrategyId[] {
+  const ranked: StrategyId[] = [];
+  for (const raw of thesis.preferredStrategies) {
+    if (STRATEGIES.includes(raw as StrategyId) && !ranked.includes(raw as StrategyId)) {
+      ranked.push(raw as StrategyId);
+    }
+  }
+
+  const bias = thesis.hedgeBias === "perp"
+    ? "perp-short"
+    : thesis.hedgeBias === "protective-put"
+      ? "protective-put"
+      : thesis.hedgeBias === "collar"
+        ? "collar"
+        : "de-risk";
+  if (!ranked.includes(bias)) {
+    ranked.unshift(bias);
+  }
+
+  for (const candidate of STRATEGIES) {
+    if (!ranked.includes(candidate)) {
+      ranked.push(candidate);
+    }
+  }
+
+  return ranked;
 }
 
 function buildProposal(
-  options: {
-    name: string;
-    reason: string;
-    estimatedCost: string;
-    estimatedProtection: string;
-    riskTags?: string[];
-    orderPlan: SwapOrderPlanStep[];
-    readSymbols: string[];
-    plane: SkillContext["plane"];
-  },
+  strategyId: StrategyId,
+  context: SkillContext,
+  thesis: TradeThesis,
+  regime: MarketRegime,
+  profile: PortfolioRiskProfile,
+  marketSnapshot: unknown,
 ): SkillProposal {
-  const readIntents = buildReadIntents(options.readSymbols, options.plane);
-  const writeIntents = options.orderPlan.map((step) => toSwapIntent(step, options.plane));
+  const primarySymbol = choosePrimarySymbol(profile);
+  const referencePx = readLastPrice(marketSnapshot, primarySymbol);
+  const absNetUsd = Math.abs(profile.directionalExposure.netUsd);
+  const cappedNotional = Math.min(
+    Math.max(absNetUsd, thesis.riskBudget.maxSingleOrderUsd * 0.6),
+    thesis.riskBudget.maxSingleOrderUsd,
+  );
+  const premiumSpendUsd = Math.min(
+    Math.max(thesis.riskBudget.maxPremiumSpendUsd * 0.75, 100),
+    thesis.riskBudget.maxPremiumSpendUsd,
+  );
+  const readIntents = buildReadIntents(primarySymbol, context.plane);
+  const artifactRefs = [
+    { key: "trade.thesis" as const, producer: "trade-thesis", version: 1 },
+    { key: "portfolio.risk-profile" as const, producer: "portfolio-xray", version: 1 },
+    { key: "market.snapshot" as const, producer: "market-scan", version: 1 },
+  ];
+  const baseRiskTags = [
+    `strategy:${strategyId}`,
+    "strategy-source:trade-thesis",
+    `regime:${thesis.directionalRegime}`,
+    `vol:${thesis.volState}`,
+  ];
 
+  if (strategyId === "perp-short") {
+    const side = profile.directionalExposure.netUsd >= 0 ? "sell" : "buy";
+    const step = makeSwapStep({
+      symbol: primarySymbol,
+      side,
+      notionalUsd: cappedNotional,
+      referencePx,
+      purpose: "Offset net directional exposure with a perp hedge.",
+      riskTags: [...baseRiskTags, `funding:${regime.fundingState}`],
+      tag: "mesh-perp",
+    });
+
+    const orderPlan = step ? [step] : [];
+    return {
+      name: "perp-short",
+      strategyId,
+      reason: `Use perp hedge because thesis bias=${thesis.hedgeBias} and funding=${regime.fundingState}.`,
+      estimatedCost: regime.fundingState === "longs-paying" ? "carry cost elevated" : "carry cost moderate",
+      estimatedProtection: `Hedge up to ${cappedNotional.toFixed(0)} USD of net exposure`,
+      riskTags: [...baseRiskTags, "instrument:swap"],
+      evidence: {
+        artifactRefs,
+        ruleRefs: thesis.ruleRefs,
+        doctrineRefs: thesis.doctrineRefs,
+      },
+      riskBudgetUse: {
+        orderNotionalUsd: cappedNotional,
+        marginUseUsd: cappedNotional * 0.12,
+        correlationBucketPct: profile.concentration.topSharePct,
+      },
+      decisionNotes: [...thesis.decisionNotes],
+      requiredModules: ["account", "market", "swap"],
+      intents: [...readIntents, ...orderPlan.map((item) => createCommandIntent(buildSwapCommand(item.params, context.plane), {
+        module: "swap",
+        requiresWrite: true,
+        reason: item.purpose,
+      }))],
+      orderPlan,
+    };
+  }
+
+  if (strategyId === "protective-put") {
+    const putLeg = makeOptionStep({
+      symbol: primarySymbol,
+      referencePx,
+      premiumUsd: premiumSpendUsd,
+      side: "buy",
+      right: "P",
+      purpose: "Buy downside convexity for the primary concentration symbol.",
+      strategy: "protective-put",
+      leg: "protective-put",
+      multiplier: 0.95,
+      riskTags: [...baseRiskTags, "instrument:option"],
+    });
+    return {
+      name: "protective-put",
+      strategyId,
+      reason: `Buy convex downside protection because vol=${thesis.volState} and tailRisk=${thesis.tailRiskState}.`,
+      estimatedCost: `${premiumSpendUsd.toFixed(0)} USD premium budget`,
+      estimatedProtection: `Downside convexity on ${primarySymbol}`,
+      riskTags: [...baseRiskTags, "instrument:option"],
+      evidence: {
+        artifactRefs,
+        ruleRefs: thesis.ruleRefs,
+        doctrineRefs: thesis.doctrineRefs,
+      },
+      riskBudgetUse: {
+        premiumSpendUsd,
+        correlationBucketPct: profile.concentration.topSharePct,
+      },
+      decisionNotes: [...thesis.decisionNotes],
+      requiredModules: ["account", "market", "option"],
+      intents: [
+        ...readIntents,
+        createCommandIntent(buildOptionCommand(putLeg.params, context.plane), {
+          module: "option",
+          requiresWrite: true,
+          reason: putLeg.purpose,
+        }),
+      ],
+      orderPlan: [putLeg],
+    };
+  }
+
+  if (strategyId === "collar") {
+    const putBudget = premiumSpendUsd;
+    const callBudget = Math.max(putBudget * 0.6, 80);
+    const putLeg = makeOptionStep({
+      symbol: primarySymbol,
+      referencePx,
+      premiumUsd: putBudget,
+      side: "buy",
+      right: "P",
+      purpose: "Buy protective put leg.",
+      strategy: "collar",
+      leg: "protective-put",
+      multiplier: 0.95,
+      riskTags: [...baseRiskTags, "instrument:option"],
+    });
+    const callLeg = makeOptionStep({
+      symbol: primarySymbol,
+      referencePx,
+      premiumUsd: callBudget,
+      side: "sell",
+      right: "C",
+      purpose: "Sell covered-call style financing leg.",
+      strategy: "collar",
+      leg: "covered-call",
+      multiplier: 1.05,
+      riskTags: [...baseRiskTags, "instrument:option", "premium-financing"],
+    });
+    const orderPlan: OptionOrderPlanStep[] = [putLeg, callLeg];
+    return {
+      name: "collar",
+      strategyId,
+      reason: `Use collar because premium budget is constrained and tail protection is still required.`,
+      estimatedCost: `${Math.max(0, putBudget - callBudget).toFixed(0)} USD net premium`,
+      estimatedProtection: `Protected downside with capped upside on ${primarySymbol}`,
+      riskTags: [...baseRiskTags, "instrument:option", "premium-financing"],
+      evidence: {
+        artifactRefs,
+        ruleRefs: thesis.ruleRefs,
+        doctrineRefs: thesis.doctrineRefs,
+      },
+      riskBudgetUse: {
+        premiumSpendUsd: Math.max(0, putBudget - callBudget),
+        correlationBucketPct: profile.concentration.topSharePct,
+      },
+      decisionNotes: [...thesis.decisionNotes],
+      requiredModules: ["account", "market", "option"],
+      intents: [
+        ...readIntents,
+        ...orderPlan.map((item) =>
+          createCommandIntent(buildOptionCommand(item.params, context.plane), {
+            module: "option",
+            requiresWrite: true,
+            reason: item.purpose,
+          })),
+      ],
+      orderPlan,
+    };
+  }
+
+  const hotspot = profile.leverageHotspots[0];
+  const reduceSymbol = hotspot?.symbol ?? primarySymbol;
+  const reducePrice = readLastPrice(marketSnapshot, reduceSymbol);
+  const reduceNotional = Math.min(
+    Math.max(hotspot?.notionalUsd ?? cappedNotional * 0.8, 100),
+    thesis.riskBudget.maxSingleOrderUsd,
+  );
+  const reduceStep = makeSwapStep({
+    symbol: reduceSymbol,
+    side: "sell",
+    notionalUsd: reduceNotional,
+    referencePx: reducePrice,
+    reduceOnly: true,
+    purpose: "Reduce gross exposure because thesis recommends de-risking.",
+    riskTags: [...baseRiskTags, "reduce-only"],
+    tag: "mesh-derisk",
+  });
+  const orderPlan = reduceStep ? [reduceStep] : [];
   return {
-    name: options.name,
-    reason: options.reason,
-    estimatedCost: options.estimatedCost,
-    estimatedProtection: options.estimatedProtection,
-    riskTags: options.riskTags,
+    name: "de-risk",
+    strategyId,
+    reason: `Reduce leverage because discipline=${thesis.disciplineState} and tailRisk=${thesis.tailRiskState}.`,
+    estimatedCost: "Opportunity cost from smaller gross exposure",
+    estimatedProtection: `Reduce ${reduceNotional.toFixed(0)} USD gross exposure`,
+    riskTags: [...baseRiskTags, "instrument:swap", "reduce-only"],
+    evidence: {
+      artifactRefs,
+      ruleRefs: thesis.ruleRefs,
+      doctrineRefs: thesis.doctrineRefs,
+    },
+    riskBudgetUse: {
+      orderNotionalUsd: reduceNotional,
+      marginUseUsd: 0,
+      correlationBucketPct: hotspot ? profile.concentration.topSharePct : 0,
+    },
+    decisionNotes: [...thesis.decisionNotes],
     requiredModules: ["account", "market", "swap"],
-    intents: [...readIntents, ...writeIntents],
-    orderPlan: options.orderPlan,
+    intents: [...readIntents, ...orderPlan.map((item) => createCommandIntent(buildSwapCommand(item.params, context.plane), {
+      module: "swap",
+      requiresWrite: true,
+      reason: item.purpose,
+    }))],
+    orderPlan,
   };
-}
-
-function summarizeOrderPlan(plan: SwapOrderPlanStep[]): string {
-  if (plan.length === 0) {
-    return "none";
-  }
-
-  return plan
-    .map(
-      (step) =>
-        `${step.params.instId} ${step.params.side} sz=${step.params.sz} px=${step.params.px ?? "mkt"}${step.params.reduceOnly ? " reduceOnly" : ""}`,
-    )
-    .join(" | ");
-}
-
-function sanitizeStrategyPriority(priority: string[]): HedgeStrategy[] {
-  const allowed = new Set<HedgeStrategy>(DEFAULT_STRATEGY_PRIORITY);
-  const normalized: HedgeStrategy[] = [];
-
-  for (const raw of priority) {
-    if (allowed.has(raw as HedgeStrategy) && !normalized.includes(raw as HedgeStrategy)) {
-      normalized.push(raw as HedgeStrategy);
-    }
-  }
-
-  for (const fallback of DEFAULT_STRATEGY_PRIORITY) {
-    if (!normalized.includes(fallback)) {
-      normalized.push(fallback);
-    }
-  }
-
-  return normalized;
 }
 
 export default async function run(context: SkillContext): Promise<SkillOutput> {
-  const symbols = (context.sharedState.symbols as string[] | undefined) ?? DEFAULT_SYMBOLS;
-  const drawdownTarget = (context.sharedState.drawdownTarget as string | undefined) ?? "4%";
-  const marketSnapshot = asObject(context.sharedState.marketSnapshot) as MarketSnapshotLike | undefined;
-  const accountSnapshot = asObject(context.sharedState.accountSnapshot) as AccountSnapshotLike | undefined;
-  const profile = parseRiskProfile(context.sharedState.portfolioRiskProfile);
-  const drawdownTargetPct = parseDrawdownTargetPct(drawdownTarget);
-  const hedgeRatio = hedgeRatioFromDrawdownTarget(drawdownTargetPct);
-  const directionalSide = sideForDirectionalNet(profile.directionalExposure.netUsd);
-  const primarySymbol = choosePrimarySymbol(symbols, profile);
-  const primaryReferencePx = resolveReferencePrice(primarySymbol, marketSnapshot);
-  const directionalTargetNotional = Math.abs(profile.directionalExposure.netUsd) * hedgeRatio;
-
-  // 从 hedging-strats.md 加载策略选择规则
-  let strategyPriority: HedgeStrategy[] = [...DEFAULT_STRATEGY_PRIORITY];
-  let rulesMetadata: Record<string, unknown> = {};
-  
-  try {
-    const doc = await loadRules("hedging-strats.md");
-    
-    // 提取资金费率阈值和优先级规则
-    const fundingRule = findRule(doc, "funding-rate-priority");
-    const ivRule = findRule(doc, "iv-percentile-priority");
-    
-    // 提取市场环境
-    const fundingRate = toNumber((marketSnapshot as Record<string, unknown>)?.fundingRate) ?? 0;
-    // IV percentile 需要从 marketSnapshot 推断，暂时用波动率替代
-    const volatilityNote = toString((marketSnapshot as Record<string, unknown>)?.volatilityNote) ?? "";
-    const isHighVolatility = volatilityNote.includes("high") || volatilityNote.includes("高波动");
-    
-    // 根据规则决定策略优先级
-    if (fundingRate > 0.01 && fundingRule) {
-      // 资金费率过高，优先 option
-      strategyPriority = ["protective-put", "collar", "perp-short"];
-      rulesMetadata = { 
-        rule: "funding-rate-priority", 
-        fundingRate, 
-        threshold: fundingRule.params.threshold ?? "0.01" 
-      };
-    } else if (isHighVolatility && ivRule) {
-      // IV 过高，期权贵，优先 perp
-      strategyPriority = ["perp-short", "collar", "protective-put"];
-      rulesMetadata = { 
-        rule: "iv-percentile-priority", 
-        volatilityNote 
-      };
-    }
-    
-    strategyPriority = sanitizeStrategyPriority(strategyPriority);
-    rulesMetadata.loadedRules = doc.rules.map(r => r.id);
-  } catch (error) {
-    console.error("[hedge-planner] Failed to load hedging rules:", error);
-    strategyPriority = sanitizeStrategyPriority(strategyPriority);
-  }
-
-  const directionalPlan: SwapOrderPlanStep[] = [];
-  if (directionalSide) {
-    const step = makeSwapStep({
-      symbol: primarySymbol,
-      side: directionalSide,
-      targetNotionalUsd: directionalTargetNotional,
-      referencePx: primaryReferencePx,
-      purpose: `Neutralize ${Math.abs(profile.directionalExposure.netUsd).toFixed(2)} USD net exposure with a ${hedgeRatio.toFixed(2)} hedge ratio.`,
-      riskTags: ["directional"],
-      orderTag: "mesh-dir",
-    });
-    if (step) {
-      directionalPlan.push(step);
-    }
-  }
-
-  const needsDiversification =
-    profile.concentration.topSharePct >= 55 &&
-    profile.concentration.top3.length > 1 &&
-    directionalSide !== null;
-  const diversificationBudget = Math.max(
-    directionalTargetNotional * 0.7,
-    profile.concentration.grossUsd * Math.min(0.35, hedgeRatio),
-  );
-  const diversificationPlan: SwapOrderPlanStep[] = [];
-  if (needsDiversification && directionalSide) {
-    const topSymbols = profile.concentration.top3.slice(0, 2);
-    for (const topSymbol of topSymbols) {
-      const symbol = topSymbol.symbol;
-      const symbolReferencePx = resolveReferencePrice(symbol, marketSnapshot);
-      const cappedUsd = Math.min(topSymbol.usd * 0.45, diversificationBudget * (topSymbol.sharePct / 100));
-      const step = makeSwapStep({
-        symbol,
-        side: directionalSide,
-        targetNotionalUsd: cappedUsd,
-        referencePx: symbolReferencePx,
-        purpose: `Disperse concentration risk from ${profile.concentration.topSymbol} (${profile.concentration.topSharePct.toFixed(1)}%).`,
-        riskTags: ["concentration", "diversification"],
-        orderTag: "mesh-div",
-      });
-      if (step) {
-        diversificationPlan.push(step);
-      }
-    }
-  }
-
-  if (diversificationPlan.length === 0 && directionalPlan.length > 0) {
-    diversificationPlan.push(...directionalPlan);
-  }
-
-  const positionSideLookup = buildPositionSideLookup(accountSnapshot);
-  const deleveragePlan: SwapOrderPlanStep[] = [];
-  for (const hotspot of profile.leverageHotspots.slice(0, 3)) {
-    const normalizedInstId = normalizeSwapInstId(hotspot.instId, hotspot.symbol);
-    const sideHint = positionSideLookup.get(hotspot.instId) ?? positionSideLookup.get(normalizedInstId);
-    const side: "buy" | "sell" | null =
-      sideHint === "long" ? "sell" : sideHint === "short" ? "buy" : directionalSide;
-    if (!side) {
-      continue;
-    }
-
-    const targetNotionalUsd = hotspot.notionalUsd * leverageReductionRatio(hotspot.leverage);
-    const referencePx = resolveReferencePrice(hotspot.symbol, marketSnapshot);
-    const step = makeSwapStep({
-      symbol: hotspot.symbol,
-      instId: normalizedInstId,
-      side,
-      targetNotionalUsd,
-      referencePx,
-      reduceOnly: true,
-      purpose: `Reduce leverage hotspot ${hotspot.instId} (${hotspot.leverage.toFixed(2)}x).`,
-      riskTags: ["leverage", "deleveraging"],
-      orderTag: "mesh-lev",
-    });
-
-    if (step) {
-      deleveragePlan.push(step);
-    }
-  }
-
-  if (deleveragePlan.length === 0 && directionalPlan.length > 0) {
-    deleveragePlan.push(...directionalPlan);
-  }
-
-  const strategySource = typeof rulesMetadata.rule === "string" ? `rules:${rulesMetadata.rule}` : "rules:default";
-  const baseProposals: SkillProposal[] = [
-    buildProposal({
-      name: "deleverage-first",
-      reason:
-        "Prioritize reducing high-leverage positions, then keep directional exposure from expanding.",
-      estimatedCost: "Funding + maker/taker fees, usually lower than forced liquidation risk",
-      estimatedProtection: "Fastest reduction of liquidation sensitivity on high-leverage legs",
-      riskTags: ["plan:deleverage"],
-      orderPlan: deleveragePlan,
-      readSymbols: [...new Set(deleveragePlan.map((step) => step.symbol).concat(primarySymbol))],
-      plane: context.plane,
-    }),
-    buildProposal({
-      name: "diversified-hedge",
-      reason: "Split hedge pressure across concentration-heavy symbols to avoid single-asset dependence.",
-      estimatedCost: "Multi-leg execution slippage across top concentrated assets",
-      estimatedProtection: "Better concentration control with still-meaningful directional dampening",
-      riskTags: ["plan:diversified"],
-      orderPlan: diversificationPlan,
-      readSymbols: [...new Set(diversificationPlan.map((step) => step.symbol).concat(primarySymbol))],
-      plane: context.plane,
-    }),
-    buildProposal({
-      name: "directional-net-hedge",
-      reason: "Directly neutralize the net directional exposure with a focused perpetual hedge.",
-      estimatedCost: "Single-leg funding + slippage",
-      estimatedProtection: "Highest speed to compress net delta",
-      riskTags: ["plan:directional"],
-      orderPlan: directionalPlan,
-      readSymbols: [primarySymbol],
-      plane: context.plane,
-    }),
-  ];
-
-  const proposalByName = new Map(baseProposals.map((proposal) => [proposal.name, proposal]));
-  const proposals = strategyPriority.reduce<SkillProposal[]>((ordered, strategy) => {
-      const proposal = proposalByName.get(STRATEGY_TO_PROPOSAL[strategy]);
-      if (!proposal) {
-        return ordered;
-      }
-
-      proposalByName.delete(proposal.name);
-      ordered.push({
-        ...proposal,
-        riskTags: [
-          ...new Set([...(proposal.riskTags ?? []), `strategy:${strategy}`, `strategy-source:${strategySource}`]),
-        ],
-      });
-      return ordered;
-    }, []);
-
-  for (const proposal of proposalByName.values()) {
-    proposals.push({
-      ...proposal,
-      riskTags: [...new Set([...(proposal.riskTags ?? []), "strategy:unmapped", `strategy-source:${strategySource}`])],
-    });
-  }
-
-  const ranked = proposals
-    .filter((proposal) => (proposal.orderPlan?.length ?? 0) > 0)
-    .map((proposal) => proposal.name);
-
-  context.sharedState.proposals = proposals;
-  context.sharedState.hedgePlannerRanked = ranked;
-  context.sharedState.hedgePlannerSignals = {
-    hedgeRatio,
-    directionalTargetNotional,
-    needsDiversification,
-    leverageHotspotCount: profile.leverageHotspots.length,
+  const thesis = context.artifacts.require<TradeThesis>("trade.thesis").data;
+  const profile = context.artifacts.require<PortfolioRiskProfile>("portfolio.risk-profile").data;
+  const marketSnapshot = context.artifacts.get("market.snapshot")?.data;
+  const regime = context.artifacts.get<MarketRegime>("market.regime")?.data ?? {
+    symbols: [],
+    directionalRegime: thesis.directionalRegime,
+    volState: thesis.volState,
+    tailRiskState: thesis.tailRiskState,
+    fundingState: "neutral",
+    conviction: thesis.conviction,
+    trendScores: [],
+    marketVolatility: null,
+    ruleRefs: thesis.ruleRefs,
+    doctrineRefs: thesis.doctrineRefs,
   };
 
-  const allowedModules = [...new Set(proposals.flatMap((proposal) => proposal.requiredModules ?? []))];
-  const facts = [
-    `Directional exposure net=${profile.directionalExposure.netUsd.toFixed(2)} USD => hedge side ${
-      directionalSide ?? "flat"
-    }.`,
-    `Drawdown target ${drawdownTarget} => hedge ratio ${hedgeRatio.toFixed(2)}.`,
-    `Concentration top=${profile.concentration.topSymbol} share=${profile.concentration.topSharePct.toFixed(1)}%, diversification=${
-      needsDiversification ? "enabled" : "not required"
-    }.`,
-    `Leverage hotspots prioritized: ${profile.leverageHotspots.length}.`,
-    `Strategy priority: ${strategyPriority.join(" > ")} (top=${strategyPriority[0]}).`,
-    `First proposal: ${proposals[0]?.name ?? "n/a"} with tags ${(proposals[0]?.riskTags ?? []).join(", ") || "n/a"}.`,
-    `Directional order params: ${summarizeOrderPlan(directionalPlan)}.`,
-    `Diversified order params: ${summarizeOrderPlan(diversificationPlan)}.`,
-    `Deleverage order params: ${summarizeOrderPlan(deleveragePlan)}.`,
-  ];
+  const rankedStrategies = preferredStrategies(thesis);
+  const proposals = rankedStrategies.map((strategyId) =>
+    buildProposal(strategyId, context, thesis, regime, profile, marketSnapshot),
+  );
 
+  putArtifact(context.artifacts, {
+    key: "planning.proposals",
+    version: context.manifest.artifactVersion,
+    producer: context.manifest.name,
+    data: proposals,
+    ruleRefs: thesis.ruleRefs,
+    doctrineRefs: thesis.doctrineRefs,
+  });
+
+  const first = proposals[0];
   return {
     skill: "hedge-planner",
     stage: "planner",
     goal: context.goal,
-    summary: "Compute hedge direction/size from portfolio risk profile and emit precise swap place-order parameters.",
-    facts,
+    summary: "Rank hedge proposals from the shared trade thesis instead of raw market heuristics.",
+    facts: [
+      `Primary strategy: ${first?.strategyId ?? "n/a"}.`,
+      `Ranked strategies: ${rankedStrategies.join(" -> ")}.`,
+      `Risk budget: single=${thesis.riskBudget.maxSingleOrderUsd.toFixed(0)} premium=${thesis.riskBudget.maxPremiumSpendUsd.toFixed(0)} margin=${thesis.riskBudget.maxMarginUseUsd.toFixed(0)}.`,
+    ],
     constraints: {
-      selectedSymbols: symbols,
-      drawdownTarget,
-      hedgeRatio,
-      requiredModules: allowedModules,
-      mustCompare: proposals.map((proposal) => proposal.name),
-      directionalExposure: profile.directionalExposure,
-      concentration: profile.concentration,
-      leverageHotspots: profile.leverageHotspots,
+      rankedStrategies,
+      requiredModules: [...new Set(proposals.flatMap((proposal) => proposal.requiredModules ?? []))],
+      thesisDirection: thesis.directionalRegime,
+      thesisBias: thesis.hedgeBias,
     },
     proposal: proposals,
     risk: {
-      score: 0.34,
-      maxLoss: "Execution slippage and funding drift if hedge ratio is oversized",
-      needsApproval: true,
-      reasons: [
-        "Planner emits swap write intents with explicit size/price parameters.",
-        "Deleverage actions can change margin profile quickly.",
-      ],
+      score: thesis.tailRiskState === "stress" ? 0.72 : thesis.volState === "elevated" ? 0.48 : 0.32,
+      maxLoss: "Proposal sizing is bounded by thesis risk budget.",
+      needsApproval: context.plane !== "research",
+      reasons: [...thesis.decisionNotes],
     },
     permissions: {
       plane: context.plane,
       officialWriteOnly: true,
-      allowedModules,
+      allowedModules: ["account", "market", "swap", "option"],
     },
-    handoff: "policy-gate",
+    handoff: "scenario-sim",
+    handoffReason: "Proposals are ranked and ready for scenario stress testing.",
+    producedArtifacts: ["planning.proposals"],
+    consumedArtifacts: ["trade.thesis", "portfolio.risk-profile", "market.snapshot"],
+    ruleRefs: thesis.ruleRefs,
+    doctrineRefs: thesis.doctrineRefs,
     metadata: {
-      ranked,
-      hedgeRatio,
-      directionalTargetNotional,
-      needsDiversification,
-      leverageHotspotCount: profile.leverageHotspots.length,
-      strategyPriority,
-      rulesMetadata,
+      rankedStrategies,
+      selectedPrimaryStrategy: first?.strategyId ?? null,
+      thesisBias: thesis.hedgeBias,
     },
     timestamp: new Date().toISOString(),
   };

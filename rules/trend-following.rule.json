@@ -1,0 +1,48 @@
+{
+  "rules": [
+    {
+      "id": "ma-trend-detection",
+      "doctrineId": "turtle-trend",
+      "appliesTo": ["market-scan", "trade-thesis"],
+      "inputs": ["market.snapshot"],
+      "condition": { "type": "ma-alignment", "fast": 20, "slow": 55 },
+      "action": { "type": "set-directional-regime", "field": "directionalRegime" },
+      "priority": 100,
+      "severity": "medium",
+      "docPath": "docs/rules/trend-following.md"
+    },
+    {
+      "id": "breakout-detection",
+      "doctrineId": "turtle-trend",
+      "appliesTo": ["market-scan", "trade-thesis"],
+      "inputs": ["market.snapshot"],
+      "condition": { "type": "breakout-window", "window": 20 },
+      "action": { "type": "adjust-conviction", "delta": 20 },
+      "priority": 90,
+      "severity": "medium",
+      "docPath": "docs/rules/trend-following.md"
+    },
+    {
+      "id": "atr-volatility-regime",
+      "doctrineId": "turtle-trend",
+      "appliesTo": ["market-scan", "trade-thesis", "policy-gate"],
+      "inputs": ["market.snapshot"],
+      "condition": { "type": "atr-regime", "period": 14 },
+      "action": { "type": "set-vol-state" },
+      "priority": 80,
+      "severity": "medium",
+      "docPath": "docs/rules/trend-following.md"
+    },
+    {
+      "id": "trend-score-calc",
+      "doctrineId": "turtle-trend",
+      "appliesTo": ["market-scan", "trade-thesis"],
+      "inputs": ["market.snapshot"],
+      "condition": { "type": "trend-score" },
+      "action": { "type": "set-trend-score" },
+      "priority": 70,
+      "severity": "low",
+      "docPath": "docs/rules/trend-following.md"
+    }
+  ]
+}

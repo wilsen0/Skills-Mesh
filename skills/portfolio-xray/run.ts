@@ -1,45 +1,16 @@
-import type { SkillContext, SkillOutput } from "../../runtime/types.js";
+import { putArtifact } from "../../runtime/artifacts.js";
 import { readAccountSnapshot } from "../../runtime/okx.js";
+import type {
+  PortfolioRiskProfile,
+  PortfolioSnapshot,
+  SkillContext,
+  SkillOutput,
+} from "../../runtime/types.js";
 
 const DEFAULT_SYMBOLS = ["BTC", "ETH", "SOL"];
 const IGNORED_SYMBOLS = new Set(["CLI", "OKX", "JSON", "DEMO", "LIVE"]);
 
 type JsonRecord = Record<string, unknown>;
-
-interface DirectionalExposure {
-  longUsd: number;
-  shortUsd: number;
-  netUsd: number;
-  dominantSide: "long" | "short" | "flat";
-}
-
-interface ConcentrationSummary {
-  grossUsd: number;
-  topSymbol: string;
-  topSharePct: number;
-  top3: Array<{ symbol: string; usd: number; sharePct: number }>;
-}
-
-interface LeverageHotspot {
-  instId: string;
-  symbol: string;
-  leverage: number;
-  notionalUsd: number;
-}
-
-interface FeeDragSummary {
-  makerRateBps?: number;
-  takerRateBps?: number;
-  recentFeePaidUsd: number;
-  recentFeeRows: number;
-}
-
-interface PortfolioRiskProfile {
-  directionalExposure: DirectionalExposure;
-  concentration: ConcentrationSummary;
-  leverageHotspots: LeverageHotspot[];
-  feeDrag: FeeDragSummary;
-}
 
 function extractSymbols(goal: string): string[] {
   const matches = goal.toUpperCase().match(/\b[A-Z]{2,6}\b/g) ?? [];
@@ -117,13 +88,6 @@ function toNumber(value: unknown): number | undefined {
   return undefined;
 }
 
-function toString(value: unknown): string | undefined {
-  if (typeof value === "string" && value.trim().length > 0) {
-    return value.trim();
-  }
-  return undefined;
-}
-
 function formatUsd(value: number): string {
   return `$${Math.abs(value).toLocaleString("en-US", { maximumFractionDigits: 2 })}`;
 }
@@ -150,13 +114,13 @@ function extractBalanceRows(payload: unknown): JsonRecord[] {
   return detailRows.length > 0 ? detailRows : baseRows;
 }
 
-function extractDirectionalExposure(positionRows: JsonRecord[]): DirectionalExposure {
+function extractDirectionalExposure(positionRows: JsonRecord[]): PortfolioRiskProfile["directionalExposure"] {
   let longUsd = 0;
   let shortUsd = 0;
 
   for (const row of positionRows) {
     const pos = toNumber(row.pos) ?? toNumber(row.sz) ?? 0;
-    const sideHint = toString(row.posSide)?.toLowerCase();
+    const sideHint = typeof row.posSide === "string" ? row.posSide.toLowerCase() : "";
     const inferredSide: "long" | "short" =
       sideHint === "short" ? "short" : sideHint === "long" ? "long" : pos < 0 ? "short" : "long";
     const notional =
@@ -185,11 +149,11 @@ function extractDirectionalExposure(positionRows: JsonRecord[]): DirectionalExpo
   return { longUsd, shortUsd, netUsd, dominantSide };
 }
 
-function extractConcentration(positionRows: JsonRecord[]): ConcentrationSummary {
+function extractConcentration(positionRows: JsonRecord[]): PortfolioRiskProfile["concentration"] {
   const bySymbol = new Map<string, number>();
 
   for (const row of positionRows) {
-    const instId = toString(row.instId) ?? "UNKNOWN";
+    const instId = typeof row.instId === "string" ? row.instId : "UNKNOWN";
     const symbol = symbolFromInstId(instId);
     const notional =
       Math.abs(
@@ -221,8 +185,19 @@ function extractConcentration(positionRows: JsonRecord[]): ConcentrationSummary 
   return { grossUsd, topSymbol, topSharePct, top3 };
 }
 
-function extractLeverageHotspots(positionRows: JsonRecord[]): LeverageHotspot[] {
-  const hotspots: LeverageHotspot[] = [];
+function extractCorrelationBuckets(
+  concentration: PortfolioRiskProfile["concentration"],
+): PortfolioRiskProfile["correlationBuckets"] {
+  return concentration.top3.map((entry) => ({
+    bucketId: `correlated-${entry.symbol.toLowerCase()}`,
+    symbols: [entry.symbol],
+    grossUsd: entry.usd,
+    sharePct: entry.sharePct,
+  }));
+}
+
+function extractLeverageHotspots(positionRows: JsonRecord[]): PortfolioRiskProfile["leverageHotspots"] {
+  const hotspots: PortfolioRiskProfile["leverageHotspots"] = [];
 
   for (const row of positionRows) {
     const leverage = toNumber(row.lever) ?? toNumber(row.leverage);
@@ -230,7 +205,7 @@ function extractLeverageHotspots(positionRows: JsonRecord[]): LeverageHotspot[] 
       continue;
     }
 
-    const instId = toString(row.instId) ?? "UNKNOWN";
+    const instId = typeof row.instId === "string" ? row.instId : "UNKNOWN";
     const symbol = symbolFromInstId(instId);
     const notionalUsd =
       Math.abs(
@@ -262,7 +237,7 @@ function extractMaxFeeRateBps(payload: unknown, keys: string[]): number | undefi
   return Math.max(...candidates.map((value) => Math.abs(value) * 10_000));
 }
 
-function extractFeeDrag(feeRates: unknown, bills: unknown): FeeDragSummary {
+function extractFeeDrag(feeRates: unknown, bills: unknown): PortfolioRiskProfile["feeDrag"] {
   const billRows = asObjectArray(bills);
   let recentFeePaidUsd = 0;
   let recentFeeRows = 0;
@@ -292,16 +267,48 @@ function extractFeeDrag(feeRates: unknown, bills: unknown): FeeDragSummary {
   };
 }
 
+function extractAvailableUsd(balancePayload: unknown): number | null {
+  const rows = extractBalanceRows(balancePayload);
+  let total = 0;
+  let hasValue = false;
+
+  for (const row of rows) {
+    const usdEq = toNumber(row.usdEq) ?? toNumber(row.eqUsd);
+    if (usdEq !== undefined) {
+      total += Math.max(0, usdEq);
+      hasValue = true;
+      continue;
+    }
+
+    const ccy = typeof row.ccy === "string" ? row.ccy.toUpperCase() : "";
+    const avail = toNumber(row.availBal) ?? toNumber(row.availEq);
+    if ((ccy === "USDT" || ccy === "USD") && avail !== undefined) {
+      total += Math.max(0, avail);
+      hasValue = true;
+    }
+  }
+
+  return hasValue ? total : null;
+}
+
+function extractAccountEquity(balancePayload: unknown): number {
+  const rows = extractBalanceRows(balancePayload);
+  const totalUsdEq = rows.reduce((sum, row) => sum + Math.max(0, toNumber(row.usdEq) ?? toNumber(row.eqUsd) ?? 0), 0);
+  return totalUsdEq;
+}
+
 function buildRiskProfile(
   accountSnapshot: ReturnType<typeof readAccountSnapshot>,
 ): PortfolioRiskProfile {
   const positionRows = extractPositionRows(accountSnapshot.positions);
+  const concentration = extractConcentration(positionRows);
 
   return {
     directionalExposure: extractDirectionalExposure(positionRows),
-    concentration: extractConcentration(positionRows),
+    concentration,
     leverageHotspots: extractLeverageHotspots(positionRows),
     feeDrag: extractFeeDrag(accountSnapshot.feeRates, accountSnapshot.bills),
+    correlationBuckets: extractCorrelationBuckets(concentration),
   };
 }
 
@@ -310,6 +317,35 @@ export default async function run(context: SkillContext): Promise<SkillOutput> {
   const drawdownTarget = extractDrawdownTarget(context.goal);
   const accountSnapshot = readAccountSnapshot(context.plane);
   const riskProfile = buildRiskProfile(accountSnapshot);
+  const availableUsd = extractAvailableUsd(accountSnapshot.balance);
+  const accountEquity = Math.max(extractAccountEquity(accountSnapshot.balance), availableUsd ?? 0);
+  const portfolioSnapshot: PortfolioSnapshot = {
+    source: accountSnapshot.source,
+    symbols,
+    drawdownTarget,
+    balance: accountSnapshot.balance,
+    positions: accountSnapshot.positions,
+    feeRates: accountSnapshot.feeRates,
+    bills: accountSnapshot.bills,
+    commands: accountSnapshot.commands,
+    errors: accountSnapshot.errors,
+    accountEquity,
+    availableUsd,
+  };
+
+  putArtifact(context.artifacts, {
+    key: "portfolio.snapshot",
+    version: context.manifest.artifactVersion,
+    producer: context.manifest.name,
+    data: portfolioSnapshot,
+  });
+  putArtifact(context.artifacts, {
+    key: "portfolio.risk-profile",
+    version: context.manifest.artifactVersion,
+    producer: context.manifest.name,
+    data: riskProfile,
+  });
+
   const facts = [
     `Detected symbols: ${symbols.join(", ")}`,
     `Target drawdown cap interpreted as ${drawdownTarget}`,
@@ -368,15 +404,19 @@ export default async function run(context: SkillContext): Promise<SkillOutput> {
     facts.push("Fee drag: no fee-rate or bill-fee datapoints were parsed.");
   }
 
+  facts.push(
+    `Correlation buckets: ${
+      riskProfile.correlationBuckets.length > 0
+        ? riskProfile.correlationBuckets
+            .map((bucket) => `${bucket.bucketId}=${bucket.sharePct.toFixed(1)}%`)
+            .join(", ")
+        : "none"
+    }.`,
+  );
+
   if (accountSnapshot.errors.length > 0) {
     facts.push(`Account read fallback reason: ${accountSnapshot.errors[0]}`);
   }
-
-  context.sharedState.symbols = symbols;
-  context.sharedState.drawdownTarget = drawdownTarget;
-  context.sharedState.portfolioSource = accountSnapshot.source;
-  context.sharedState.accountSnapshot = accountSnapshot;
-  context.sharedState.portfolioRiskProfile = riskProfile;
 
   return {
     skill: "portfolio-xray",
@@ -407,6 +447,11 @@ export default async function run(context: SkillContext): Promise<SkillOutput> {
       allowedModules: ["account"],
     },
     handoff: "market-scan",
+    handoffReason: "Portfolio artifacts are ready for market sensing.",
+    producedArtifacts: ["portfolio.snapshot", "portfolio.risk-profile"],
+    consumedArtifacts: [],
+    ruleRefs: [],
+    doctrineRefs: [],
     metadata: {
       symbols,
       drawdownTarget,
@@ -414,6 +459,7 @@ export default async function run(context: SkillContext): Promise<SkillOutput> {
       accountCommands: accountSnapshot.commands,
       accountErrors: accountSnapshot.errors,
       riskProfile,
+      portfolioSnapshot,
     },
     timestamp: new Date().toISOString(),
   };
