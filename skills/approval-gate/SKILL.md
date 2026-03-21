@@ -1,7 +1,7 @@
 ---
 name: approval-gate
 description: "Issue auditable approval tickets for supervised write execution."
-stage: guardrail
+stage: executor
 role: guardrail
 requires: [okx-cex-trade]
 risk_level: high

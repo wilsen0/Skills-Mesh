@@ -1,5 +1,6 @@
 import { createCommandIntent } from "../../runtime/okx.js";
 import { putArtifact } from "../../runtime/artifacts.js";
+import { createHash } from "node:crypto";
 import type {
   CommandPreviewEntry,
   OkxCommandIntent,
@@ -90,6 +91,9 @@ function buildSwapPlaceOrderCommand(params: SwapPlaceOrderParams, plane: SkillCo
   if (params.tag) {
     args.push("--tag", params.tag);
   }
+  if (params.clOrdId) {
+    args.push("--clOrdId", params.clOrdId);
+  }
   args.push(...buildPlaneFlagArgs(plane));
   return args.join(" ");
 }
@@ -118,6 +122,7 @@ function previewEntry(intent: OkxCommandIntent): CommandPreviewEntry {
     module: intent.module,
     requiresWrite: intent.requiresWrite,
     safeToRetry: intent.safeToRetry,
+    clientOrderRef: intent.clientOrderRef,
     reason: intent.reason,
     command: intent.command,
   };
@@ -217,6 +222,14 @@ function materializeProposal(proposal: SkillProposal, thesis: TradeThesis): Orde
   });
 }
 
+function createClientOrderRef(runId: string, proposalName: string, stepIndex: number): string {
+  const fingerprint = createHash("sha256")
+    .update(`${runId}|${proposalName}|${stepIndex}`)
+    .digest("hex")
+    .slice(0, 22);
+  return `tm${fingerprint}`;
+}
+
 function writeIntentForStep(
   step: OrderPlanStep,
   plane: SkillContext["plane"],
@@ -224,13 +237,19 @@ function writeIntentForStep(
   proposalName: string,
   stepIndex: number,
 ): OkxCommandIntent {
+  const clientOrderRef = createClientOrderRef(runId, proposalName, stepIndex);
   if (step.kind === "swap-place-order") {
-    return createCommandIntent(buildSwapPlaceOrderCommand(step.params, plane), {
+    const params: SwapPlaceOrderParams = {
+      ...step.params,
+      clOrdId: clientOrderRef,
+    };
+    return createCommandIntent(buildSwapPlaceOrderCommand(params, plane), {
       intentId: `${runId}:${proposalName}:write:${stepIndex}`,
       stepIndex,
       safeToRetry: false,
       module: "swap",
       requiresWrite: true,
+      clientOrderRef,
       reason: step.purpose,
     });
   }
@@ -241,6 +260,7 @@ function writeIntentForStep(
     safeToRetry: false,
     module: "option",
     requiresWrite: true,
+    clientOrderRef,
     reason: step.purpose,
   });
 }

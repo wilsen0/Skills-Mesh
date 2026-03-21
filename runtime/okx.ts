@@ -414,12 +414,14 @@ export function createCommandIntent(
     intentId?: string;
     stepIndex?: number;
     safeToRetry?: boolean;
+    clientOrderRef?: string;
   },
 ): OkxCommandIntent {
   return {
     intentId: options.intentId ?? `${options.module}:${command}`,
     stepIndex: options.stepIndex ?? 0,
     safeToRetry: options.safeToRetry ?? !options.requiresWrite,
+    clientOrderRef: options.clientOrderRef,
     command,
     args: tokenize(command),
     module: options.module,

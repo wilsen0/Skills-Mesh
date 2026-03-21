@@ -66,12 +66,28 @@ export async function buildReferencePayloads() {
       code: "0",
       data: [{ sCode: "0", sMsg: "ok" }],
     },
+    tradeOrdersHistory: {
+      code: "0",
+      data: [],
+    },
+    tradeOrdersHistoryByClOrdId: {},
+    tradeOrdersHistoryByInstId: {},
   };
 }
 
 export async function withMockOkx(payloads, fn) {
   const dir = await mkdtemp(join(tmpdir(), "okx-skill-mesh-test-"));
   const scriptPath = join(dir, "okx");
+  const clOrdBranches = Object.entries(payloads.tradeOrdersHistoryByClOrdId ?? {})
+    .map(([clOrdId, response]) =>
+      `if [[ "$clOrdId" == "${clOrdId}" ]]; then\n  echo '${shellSafeJson(response)}'\n  exit 0\nfi`,
+    )
+    .join("\n");
+  const instBranches = Object.entries(payloads.tradeOrdersHistoryByInstId ?? {})
+    .map(([instId, response]) =>
+      `if [[ "$instId" == "${instId}" ]]; then\n  echo '${shellSafeJson(response)}'\n  exit 0\nfi`,
+    )
+    .join("\n");
   const script = `#!/usr/bin/env bash
 set -euo pipefail
 cmd1="\${1-}"
@@ -114,6 +130,29 @@ if [[ "$cmd1" == "swap" && "$cmd2" == "place-order" ]]; then
 fi
 if [[ "$cmd1" == "option" && "$cmd2" == "place-order" ]]; then
   echo '${shellSafeJson(payloads.optionPlaceOrder)}'
+  exit 0
+fi
+if [[ "$cmd1" == "trade" && "$cmd2" == "orders-history" ]]; then
+  clOrdId=""
+  instId=""
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --clOrdId)
+        clOrdId="\${2-}"
+        shift 2
+        ;;
+      --instId)
+        instId="\${2-}"
+        shift 2
+        ;;
+      *)
+        shift 1
+        ;;
+    esac
+  done
+  ${clOrdBranches}
+  ${instBranches}
+  echo '${shellSafeJson(payloads.tradeOrdersHistory ?? { code: "0", data: [] })}'
   exit 0
 fi
 echo '{"code":"0","data":[]}'

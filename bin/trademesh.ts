@@ -12,6 +12,7 @@ import {
   inspectSkill,
   listRuns,
   printSkillList,
+  reconcileRun,
   replayRun,
   rehearseDemo,
   runDemo,
@@ -80,8 +81,9 @@ function printHelp(): void {
   trademesh rehearse demo [--execute] [--approve] [--json]
   trademesh replay <run-id> [--skill <name>] [--json]
   trademesh retry <run-id> [--json]
+  trademesh reconcile <run-id> [--json]
   trademesh export <run-id> [--format md|json] [--output <path>] [--json]
-  trademesh apply <run-id> [--plane demo|live] [--profile demo|live] [--proposal <name>] [--approve] [--execute] [--json]`);
+  trademesh apply <run-id> [--plane demo|live] [--profile demo|live] [--proposal <name>] [--approve] [--approved-by <name>] [--approval-reason <text>] [--execute] [--json]`);
 }
 
 function inferPlaneFromGoal(goal: string): ExecutionPlane {
@@ -387,6 +389,11 @@ async function main(): Promise<void> {
       proposalName:
         typeof parsed.flags.proposal === "string" ? parsed.flags.proposal : undefined,
       approve: parsed.flags.approve === true,
+      approvedBy: typeof parsed.flags["approved-by"] === "string" ? parsed.flags["approved-by"] : undefined,
+      approvalReason:
+        typeof parsed.flags["approval-reason"] === "string"
+          ? parsed.flags["approval-reason"]
+          : undefined,
       execute: parsed.flags.execute === true,
     });
 
@@ -402,6 +409,18 @@ async function main(): Promise<void> {
     }
 
     const record = await retryRun(runId);
+    console.log(jsonMode ? JSON.stringify(record, null, 2) : formatRunSummary(record));
+    return;
+  }
+
+  if (command === "reconcile") {
+    const parsed = parseArgs(args.slice(1));
+    const runId = parsed.positionals[0];
+    if (!runId) {
+      throw new Error("Missing run id. Example: trademesh reconcile run_20260319_001");
+    }
+
+    const record = await reconcileRun(runId);
     console.log(jsonMode ? JSON.stringify(record, null, 2) : formatRunSummary(record));
     return;
   }
