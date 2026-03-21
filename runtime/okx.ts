@@ -134,6 +134,55 @@ function detectProfilesInConfig(raw: string): { demo: boolean; live: boolean } {
   };
 }
 
+function decorateCapabilitySnapshot(input: {
+  okxCliAvailable: boolean;
+  demoProfileLikelyConfigured: boolean;
+  liveProfileLikelyConfigured: boolean;
+  configExists: boolean;
+}): Pick<CapabilitySnapshot, "readinessGrade" | "blockers" | "recommendedPlane"> {
+  const blockers: string[] = [];
+
+  if (!input.okxCliAvailable) {
+    blockers.push("okx CLI missing on PATH");
+  }
+  if (!input.configExists) {
+    blockers.push("OKX config/profiles missing");
+  }
+  if (!input.demoProfileLikelyConfigured) {
+    blockers.push("demo profile not configured");
+  }
+
+  if (input.okxCliAvailable && input.configExists && input.demoProfileLikelyConfigured) {
+    return {
+      readinessGrade: "A",
+      blockers,
+      recommendedPlane: "demo",
+    };
+  }
+
+  if (input.okxCliAvailable && input.configExists) {
+    return {
+      readinessGrade: "B",
+      blockers,
+      recommendedPlane: input.liveProfileLikelyConfigured ? "live" : "research",
+    };
+  }
+
+  if (input.okxCliAvailable || input.configExists) {
+    return {
+      readinessGrade: "C",
+      blockers,
+      recommendedPlane: "research",
+    };
+  }
+
+  return {
+    readinessGrade: "D",
+    blockers,
+    recommendedPlane: "research",
+  };
+}
+
 export async function inspectOkxEnvironment(): Promise<CapabilitySnapshot> {
   const { profilesRoot } = getProjectPaths();
   const okxCliPath = lookupOkxPath();
@@ -185,6 +234,13 @@ export async function inspectOkxEnvironment(): Promise<CapabilitySnapshot> {
     }
   }
 
+  const decoration = decorateCapabilitySnapshot({
+    okxCliAvailable: Boolean(okxCliPath),
+    configExists,
+    demoProfileLikelyConfigured,
+    liveProfileLikelyConfigured,
+  });
+
   return {
     okxCliAvailable: Boolean(okxCliPath),
     okxCliPath,
@@ -192,6 +248,9 @@ export async function inspectOkxEnvironment(): Promise<CapabilitySnapshot> {
     configExists,
     demoProfileLikelyConfigured,
     liveProfileLikelyConfigured,
+    readinessGrade: decoration.readinessGrade,
+    blockers: decoration.blockers,
+    recommendedPlane: decoration.recommendedPlane,
     warnings,
   };
 }

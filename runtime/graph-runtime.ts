@@ -5,16 +5,10 @@ import type {
   SkillOutput,
   SkillStage,
 } from "./types.js";
+import { shouldSeedManifest, triggerScore } from "./router.js";
 
 const PLANNING_STAGES: SkillStage[] = ["sensor", "planner", "guardrail"];
 const STAGE_ORDER: SkillStage[] = ["sensor", "planner", "guardrail", "executor", "memory"];
-
-function triggerScore(goal: string, manifest: SkillManifest): number {
-  const loweredGoal = goal.toLowerCase();
-  return manifest.triggers.reduce((score, trigger) => {
-    return loweredGoal.includes(trigger.toLowerCase()) ? score + 1 : score;
-  }, 0);
-}
 
 function stageRank(stage: SkillStage): number {
   const index = STAGE_ORDER.indexOf(stage);
@@ -23,22 +17,6 @@ function stageRank(stage: SkillStage): number {
 
 function isPlanningManifest(manifest: SkillManifest): boolean {
   return PLANNING_STAGES.includes(manifest.stage);
-}
-
-function manifestIsSeed(goal: string, manifest: SkillManifest): boolean {
-  if (manifest.stage === "guardrail") {
-    return true;
-  }
-
-  if (manifest.alwaysOn) {
-    return true;
-  }
-
-  if (triggerScore(goal, manifest) > 0) {
-    return true;
-  }
-
-  return manifest.consumes.length > 0;
 }
 
 function dependenciesSatisfied(manifest: SkillManifest, artifacts: ArtifactStore): boolean {
@@ -110,7 +88,7 @@ export interface PlanningGraphResult {
 export async function runPlanningGraph(options: PlanningGraphOptions): Promise<PlanningGraphResult> {
   const candidates = options.manifests
     .filter(isPlanningManifest)
-    .filter((manifest) => manifestIsSeed(options.goal, manifest));
+    .filter((manifest) => shouldSeedManifest(options.goal, manifest));
   const executedCounts = new Map<string, number>();
   const route: string[] = [];
   const trace: SkillOutput[] = [];

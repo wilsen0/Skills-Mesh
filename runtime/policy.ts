@@ -7,6 +7,7 @@ import type {
   OrderPlanStep,
   PolicyDecision,
   PolicyPhase,
+  PolicyCapabilityGap,
   PortfolioRiskProfile,
   PortfolioSnapshot,
   RiskBudget,
@@ -462,6 +463,7 @@ function decision(
     doctrineRefs?: string[];
     breachFlags?: string[];
     budgetSnapshot?: PolicyDecision["budgetSnapshot"];
+    capabilityGaps?: PolicyCapabilityGap[];
   } = {},
 ): PolicyDecision {
   return {
@@ -477,11 +479,100 @@ function decision(
     doctrineRefs: extras.doctrineRefs ?? [],
     breachFlags: extras.breachFlags ?? [],
     budgetSnapshot: extras.budgetSnapshot,
+    capabilityGaps: extras.capabilityGaps ?? [],
   };
 }
 
 function defaultAllowedModules(plane: ExecutionPlane): string[] {
   return plane === "research" ? ["account", "market"] : ["account", "market", "swap", "option"];
+}
+
+function capabilityGap(
+  id: string,
+  severity: PolicyCapabilityGap["severity"],
+  message: string,
+  remedy: string,
+): PolicyCapabilityGap {
+  return {
+    id,
+    severity,
+    message,
+    remedy,
+  };
+}
+
+function deriveCapabilityGaps(
+  input: EvaluatePolicyInput,
+): PolicyCapabilityGap[] {
+  const snapshot = input.capabilitySnapshot;
+  if (!snapshot) {
+    return [];
+  }
+
+  const executeSeverity: PolicyCapabilityGap["severity"] =
+    input.phase === "apply" && input.executeRequested ? "blocker" : "warn";
+  const gaps: PolicyCapabilityGap[] = [];
+
+  if (!snapshot.okxCliAvailable) {
+    gaps.push(
+      capabilityGap(
+        "okx-cli",
+        executeSeverity,
+        "OKX CLI is not available on PATH; only preview-mode flows are safe right now.",
+        "Install `okx` CLI and rerun `trademesh doctor`.",
+      ),
+    );
+  }
+
+  if (!snapshot.configExists) {
+    gaps.push(
+      capabilityGap(
+        "okx-config",
+        executeSeverity,
+        "No executable OKX config was detected; runtime can plan, but cannot confidently execute.",
+        "Create ~/.okx/config.toml or the local profiles/ files before execution.",
+      ),
+    );
+  }
+
+  if (input.plane === "demo" && !snapshot.demoProfileLikelyConfigured) {
+    gaps.push(
+      capabilityGap(
+        "demo-profile",
+        executeSeverity,
+        "Demo plane is selected but no demo profile was detected.",
+        "Configure a demo profile before running `apply --execute` on demo.",
+      ),
+    );
+  }
+
+  if (input.plane === "live" && !snapshot.liveProfileLikelyConfigured) {
+    gaps.push(
+      capabilityGap(
+        "live-profile",
+        executeSeverity,
+        "Live plane is selected but no live profile was detected.",
+        "Configure a live profile or switch back to the demo plane.",
+      ),
+    );
+  }
+
+  if (
+    input.phase === "plan" &&
+    input.plane !== "research" &&
+    snapshot.recommendedPlane === "research"
+  ) {
+    gaps.push(
+      capabilityGap(
+        "recommended-plane",
+        "info",
+        "Current environment is better suited for research/demo preview than for executed writes.",
+        "Use `apply --approve` without `--execute` first, then rerun doctor after environment setup.",
+      ),
+    );
+  }
+
+  return gaps;
 }
 
 export async function evaluatePolicy(input: EvaluatePolicyInput): Promise<PolicyDecision> {
@@ -492,13 +583,18 @@ export async function evaluatePolicy(input: EvaluatePolicyInput): Promise<Policy
     orderSlicesFromPlan.length > 0 ? orderSlicesFromPlan : parseOrderSlicesFromIntents(intents);
   const writeSlices = orderSlices.filter((slice) => slice.notionalUsd > 0);
   const proposal = input.proposal;
+  const capabilityGaps = deriveCapabilityGaps(input);
 
   if (intents.length === 0 && (!proposal.orderPlan || proposal.orderPlan.length === 0)) {
-    return decision(input, proposal, "blocked", [`proposal '${proposal.name}' does not contain executable intents`]);
+    return decision(input, proposal, "blocked", [`proposal '${proposal.name}' does not contain executable intents`], {
+      capabilityGaps,
+    });
   }
 
   if (input.plane === "research" && writes) {
-    return decision(input, proposal, "blocked", ["research plane blocks all write intents"]);
+    return decision(input, proposal, "blocked", ["research plane blocks all write intents"], {
+      capabilityGaps,
+    });
   }
 
   const allowedModules = input.allowedModules ?? defaultAllowedModules(input.plane);
@@ -506,7 +602,9 @@ export async function evaluatePolicy(input: EvaluatePolicyInput): Promise<Policy
     .filter((intent) => !allowedModules.includes(intent.module))
     .map((intent) => `required module '${intent.module}' is not allowed in this plane`);
   if (moduleViolations.length > 0) {
-    return decision(input, proposal, "blocked", moduleViolations);
+    return decision(input, proposal, "blocked", moduleViolations, {
+      capabilityGaps,
+    });
   }
 
   const thesis = tradeThesisFromArtifacts(input.artifacts);
@@ -529,6 +627,7 @@ export async function evaluatePolicy(input: EvaluatePolicyInput): Promise<Policy
         doctrineRefs: [...new Set([...doctrineRefs, "discipline"])],
         breachFlags,
         budgetSnapshot: limits,
+        capabilityGaps,
       },
     );
   }
@@ -545,6 +644,7 @@ export async function evaluatePolicy(input: EvaluatePolicyInput): Promise<Policy
         doctrineRefs: [...new Set([...doctrineRefs, "discipline"])],
         breachFlags,
         budgetSnapshot: limits,
+        capabilityGaps,
       },
     );
   }
@@ -565,6 +665,7 @@ export async function evaluatePolicy(input: EvaluatePolicyInput): Promise<Policy
       doctrineRefs,
       breachFlags,
       budgetSnapshot: limits,
+      capabilityGaps,
     });
   }
 
@@ -597,6 +698,7 @@ export async function evaluatePolicy(input: EvaluatePolicyInput): Promise<Policy
       doctrineRefs,
       breachFlags,
       budgetSnapshot: limits,
+      capabilityGaps,
     });
   }
 
@@ -629,6 +731,7 @@ export async function evaluatePolicy(input: EvaluatePolicyInput): Promise<Policy
       doctrineRefs,
       breachFlags,
       budgetSnapshot: limits,
+      capabilityGaps,
     });
   }
 
@@ -643,6 +746,7 @@ export async function evaluatePolicy(input: EvaluatePolicyInput): Promise<Policy
         doctrineRefs,
         breachFlags,
         budgetSnapshot: limits,
+        capabilityGaps,
       });
     }
   }
@@ -655,6 +759,7 @@ export async function evaluatePolicy(input: EvaluatePolicyInput): Promise<Policy
         doctrineRefs,
         breachFlags,
         budgetSnapshot: limits,
+        capabilityGaps,
       });
     }
     if (!input.capabilitySnapshot.configExists) {
@@ -664,6 +769,7 @@ export async function evaluatePolicy(input: EvaluatePolicyInput): Promise<Policy
         doctrineRefs,
         breachFlags,
         budgetSnapshot: limits,
+        capabilityGaps,
       });
     }
   }
@@ -683,6 +789,7 @@ export async function evaluatePolicy(input: EvaluatePolicyInput): Promise<Policy
         doctrineRefs,
         breachFlags,
         budgetSnapshot: limits,
+        capabilityGaps,
       },
     );
   }
@@ -700,6 +807,7 @@ export async function evaluatePolicy(input: EvaluatePolicyInput): Promise<Policy
       doctrineRefs,
       breachFlags,
       budgetSnapshot: limits,
+      capabilityGaps,
     },
   );
 }

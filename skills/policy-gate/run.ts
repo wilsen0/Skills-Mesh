@@ -26,6 +26,11 @@ function chooseProposal(context: SkillContext, proposals: SkillProposal[]): Skil
     }
   }
 
+  const recommended = proposals.find((entry) => entry.recommended);
+  if (recommended) {
+    return recommended;
+  }
+
   return proposals[0]!;
 }
 
@@ -49,6 +54,9 @@ export default async function run(context: SkillContext): Promise<SkillOutput> {
     plane: context.plane,
     approvalProvided: false,
     executeRequested: false,
+    capabilitySnapshot:
+      (context.runtimeInput.capabilitySnapshot as Parameters<typeof evaluatePolicy>[0]["capabilitySnapshot"]) ??
+      undefined,
   });
 
   putArtifact(context.artifacts, {
@@ -69,6 +77,9 @@ export default async function run(context: SkillContext): Promise<SkillOutput> {
       `Selected proposal: ${proposal.name}.`,
       `Policy outcome: ${decision.outcome}.`,
       ...decision.reasons.map((reason) => `Reason: ${reason}`),
+      ...(decision.capabilityGaps ?? []).map(
+        (gap) => `Capability gap [${gap.severity}]: ${gap.message}`,
+      ),
     ],
     constraints: {
       selectedProposal: proposal.name,
@@ -76,6 +87,7 @@ export default async function run(context: SkillContext): Promise<SkillOutput> {
       decision: decision.outcome,
       breachFlags: decision.breachFlags ?? [],
       budgetSnapshot: decision.budgetSnapshot ?? null,
+      capabilityGaps: decision.capabilityGaps ?? [],
     },
     proposal: [],
     risk: {
@@ -106,6 +118,7 @@ export default async function run(context: SkillContext): Promise<SkillOutput> {
       policyNotes: decision.reasons,
       selectedProposal: proposal.name,
       budgetSnapshot: decision.budgetSnapshot ?? null,
+      capabilityGaps: decision.capabilityGaps ?? [],
     },
     timestamp: new Date().toISOString(),
   };

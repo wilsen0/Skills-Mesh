@@ -70,6 +70,15 @@ export interface RiskBudgetUse {
   correlationBucketPct?: number;
 }
 
+export interface ProposalScoreBreakdown {
+  total: number;
+  protection: number;
+  cost: number;
+  executionRisk: number;
+  policyFit: number;
+  dataConfidence: number;
+}
+
 export interface OkxCommandIntent {
   command: string;
   args: string[];
@@ -103,6 +112,9 @@ export interface SkillProposal {
   reason: string;
   estimatedCost?: string;
   estimatedProtection?: string;
+  recommended?: boolean;
+  scoreBreakdown?: ProposalScoreBreakdown;
+  rejectionReason?: string;
   riskTags?: string[];
   evidence?: ProposalEvidence;
   scenarioMatrix?: ScenarioMatrix;
@@ -182,6 +194,9 @@ export interface CapabilitySnapshot {
   configExists: boolean;
   demoProfileLikelyConfigured: boolean;
   liveProfileLikelyConfigured: boolean;
+  readinessGrade: "A" | "B" | "C" | "D";
+  blockers: string[];
+  recommendedPlane: ExecutionPlane | "none";
   warnings: string[];
 }
 
@@ -197,6 +212,13 @@ export interface PolicyBudgetSnapshot {
   leverageAdjusted: boolean;
 }
 
+export interface PolicyCapabilityGap {
+  id: string;
+  severity: "info" | "warn" | "blocker";
+  message: string;
+  remedy: string;
+}
+
 export interface PolicyDecision {
   outcome: "approved" | "require_approval" | "blocked";
   reasons: string[];
@@ -210,6 +232,7 @@ export interface PolicyDecision {
   doctrineRefs?: string[];
   breachFlags?: string[];
   budgetSnapshot?: PolicyBudgetSnapshot;
+  capabilityGaps?: PolicyCapabilityGap[];
 }
 
 export interface ExecutionResult {
@@ -405,6 +428,19 @@ export interface SkillContext {
 
 export type SkillHandler = (context: SkillContext) => Promise<SkillOutput>;
 
+export interface RouteSummary {
+  selectedSkills: string[];
+  skippedSkills: string[];
+  reasons: string[];
+}
+
+export interface JudgeSummary {
+  headline: string;
+  selectedProposal?: string;
+  policyVerdict: string;
+  executionVerdict: string;
+}
+
 export interface RunRecord {
   kind: "trademesh-run";
   version: 1;
@@ -425,6 +461,8 @@ export interface RunRecord {
   executions: ExecutionRecord[];
   errors: RunErrorRecord[];
   selectedProposal?: string;
+  routeSummary?: RouteSummary;
+  judgeSummary?: JudgeSummary;
   notes: string[];
   createdAt: string;
   updatedAt: string;

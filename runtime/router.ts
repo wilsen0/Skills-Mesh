@@ -1,136 +1,81 @@
 import type { SkillManifest } from "./types.js";
 
-const SENSOR_ORDER = ["portfolio-xray", "market-scan"];
-const EXECUTION_TAIL = ["official-executor", "replay"];
-const CHAIN_TEMPLATES: Array<{ match: RegExp; chain: string[] }> = [
-  {
-    match: /(hedge|drawdown|protect|downside|risk|volatility|对冲|回撤|风险|波动)/i,
-    chain: [
-      "portfolio-xray",
-      "market-scan",
-      "trade-thesis",
-      "hedge-planner",
-      "scenario-sim",
-      "policy-gate",
-      "official-executor",
-      "replay",
-    ],
-  },
-  {
-    match: /(grid|dca|bot|ladder)/i,
-    chain: ["market-scan", "policy-gate", "official-executor", "replay"],
-  },
-];
+const STAGE_ORDER: SkillManifest["stage"][] = ["sensor", "planner", "guardrail", "executor", "memory"];
 
-function triggerScore(goal: string, manifest: SkillManifest): number {
+function stageRank(stage: SkillManifest["stage"]): number {
+  const index = STAGE_ORDER.indexOf(stage);
+  return index === -1 ? Number.MAX_SAFE_INTEGER : index;
+}
+
+export function matchingTriggers(goal: string, manifest: SkillManifest): string[] {
   const loweredGoal = goal.toLowerCase();
-  return manifest.triggers.reduce((score, trigger) => {
-    return loweredGoal.includes(trigger.toLowerCase()) ? score + 1 : score;
-  }, 0);
+  return manifest.triggers.filter((trigger) => loweredGoal.includes(trigger.toLowerCase()));
 }
 
-function isPlanningStage(manifest: SkillManifest): boolean {
-  return (
-    manifest.stage === "sensor" || manifest.stage === "planner" || manifest.stage === "guardrail"
-  );
+export function triggerScore(goal: string, manifest: SkillManifest): number {
+  return matchingTriggers(goal, manifest).length;
 }
 
-function uniqueSkillNames(skills: string[]): string[] {
-  return skills.filter((name, index) => skills.indexOf(name) === index);
-}
+export function seedReasons(goal: string, manifest: SkillManifest): string[] {
+  const reasons: string[] = [];
+  const matched = matchingTriggers(goal, manifest);
 
-function uniqueManifests(manifests: SkillManifest[]): SkillManifest[] {
-  const seen = new Set<string>();
-  const unique: SkillManifest[] = [];
-
-  for (const manifest of manifests) {
-    if (seen.has(manifest.name)) {
-      continue;
-    }
-    seen.add(manifest.name);
-    unique.push(manifest);
+  if (manifest.alwaysOn) {
+    reasons.push("always_on");
+  }
+  if (matched.length > 0) {
+    reasons.push(`trigger:${matched.join(",")}`);
+  }
+  if (manifest.stage === "guardrail") {
+    reasons.push("guardrail");
+  }
+  if (manifest.consumes.length > 0) {
+    reasons.push(`consumes:${manifest.consumes.join(",")}`);
+  }
+  if (reasons.length === 0) {
+    reasons.push("manual");
   }
 
-  return unique;
+  return reasons;
 }
 
-function buildTemplateChain(goal: string, manifests: SkillManifest[]): string[] {
-  const selectedTemplate = CHAIN_TEMPLATES.find((template) => template.match.test(goal));
-  if (!selectedTemplate) {
-    return [];
+export function shouldSeedManifest(goal: string, manifest: SkillManifest): boolean {
+  if (manifest.stage === "guardrail") {
+    return true;
   }
 
-  const available = new Set(manifests.map((manifest) => manifest.name));
-  return selectedTemplate.chain.filter((name) => available.has(name));
-}
+  if (manifest.alwaysOn) {
+    return true;
+  }
 
-function triggeredSkills(goal: string, manifests: SkillManifest[]): string[] {
-  const loweredGoal = goal.toLowerCase();
-  return manifests
-    .filter((manifest) => manifest.triggers.some((trigger) => loweredGoal.includes(trigger.toLowerCase())))
-    .map((manifest) => manifest.name);
-}
+  if (triggerScore(goal, manifest) > 0) {
+    return true;
+  }
 
-function buildDefaultPlanningRoute(goal: string, manifests: SkillManifest[]): SkillManifest[] {
-  const sensors = manifests
-    .filter((manifest) => manifest.stage === "sensor")
-    .filter((manifest) => manifest.alwaysOn || triggerScore(goal, manifest) > 0)
-    .sort((left, right) => {
-      const leftIndex = SENSOR_ORDER.indexOf(left.name);
-      const rightIndex = SENSOR_ORDER.indexOf(right.name);
-      const normalizedLeft = leftIndex === -1 ? Number.MAX_SAFE_INTEGER : leftIndex;
-      const normalizedRight = rightIndex === -1 ? Number.MAX_SAFE_INTEGER : rightIndex;
-      return normalizedLeft - normalizedRight || left.name.localeCompare(right.name);
-    });
-
-  const planners = manifests
-    .filter((manifest) => manifest.stage === "planner")
-    .sort((left, right) => triggerScore(goal, right) - triggerScore(goal, left) || left.name.localeCompare(right.name));
-
-  const guardrails = manifests
-    .filter((manifest) => manifest.stage === "guardrail")
-    .sort((left, right) => left.name.localeCompare(right.name));
-
-  return [...sensors, ...planners, ...guardrails].filter(
-    (manifest): manifest is SkillManifest => Boolean(manifest),
-  );
+  return manifest.consumes.length > 0;
 }
 
 export function buildPlanningRoute(goal: string, manifests: SkillManifest[]): SkillManifest[] {
-  const byName = new Map(manifests.map((manifest) => [manifest.name, manifest]));
-  const templatePlanningRoute = buildTemplateChain(goal, manifests)
-    .map((name) => byName.get(name))
-    .filter((manifest): manifest is SkillManifest => Boolean(manifest))
-    .filter(isPlanningStage);
-  const triggerPlanningRoute = triggeredSkills(goal, manifests)
-    .map((name) => byName.get(name))
-    .filter((manifest): manifest is SkillManifest => Boolean(manifest))
-    .filter(isPlanningStage);
-
-  if (templatePlanningRoute.length > 0) {
-    return uniqueManifests([...templatePlanningRoute, ...triggerPlanningRoute]);
-  }
-
-  return buildDefaultPlanningRoute(goal, manifests);
+  return [...manifests]
+    .filter((manifest) => manifest.stage !== "executor" && manifest.stage !== "memory")
+    .filter((manifest) => shouldSeedManifest(goal, manifest))
+    .sort((left, right) => {
+      return (
+        stageRank(left.stage) - stageRank(right.stage) ||
+        triggerScore(goal, right) - triggerScore(goal, left) ||
+        left.name.localeCompare(right.name)
+      );
+    });
 }
 
 export function buildRunRoute(goal: string, manifests: SkillManifest[]): string[] {
   const planningRoute = buildPlanningRoute(goal, manifests).map((manifest) => manifest.name);
-  const installed = new Set(manifests.map((manifest) => manifest.name));
-  const templateRoute = buildTemplateChain(goal, manifests);
-  const triggerRoute = triggeredSkills(goal, manifests).filter((name) => installed.has(name));
-  const route = uniqueSkillNames([
-    ...(templateRoute.length > 0 ? templateRoute : planningRoute),
-    ...triggerRoute,
-  ]);
+  const extras = manifests
+    .filter((manifest) => manifest.stage === "executor" || manifest.stage === "memory")
+    .sort((left, right) => stageRank(left.stage) - stageRank(right.stage) || left.name.localeCompare(right.name))
+    .map((manifest) => manifest.name);
 
-  for (const skillName of EXECUTION_TAIL) {
-    if (installed.has(skillName) && !route.includes(skillName)) {
-      route.push(skillName);
-    }
-  }
-
-  return route;
+  return [...new Set([...planningRoute, ...extras])];
 }
 
 export function resolveExecutor(manifests: SkillManifest[]): SkillManifest {
