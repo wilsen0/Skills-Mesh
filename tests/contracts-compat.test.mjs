@@ -5,9 +5,16 @@ import test from "node:test";
 import { createArtifactStore, putArtifact } from "../dist/runtime/artifacts.js";
 import { applyRun } from "../dist/runtime/executor.js";
 import { validateDoctrineCard, validateRuleCard } from "../dist/runtime/contracts.js";
-import { loadArtifactSnapshot, saveArtifactSnapshot } from "../dist/runtime/trace.js";
+import {
+  loadArtifactSnapshot,
+  loadExecutionEnvelope,
+  loadPolicyEnvelope,
+  loadTraceEnvelope,
+  saveArtifactSnapshot,
+  saveRun,
+} from "../dist/runtime/trace.js";
 
-test("artifact store reports legacy sharedState seeding as compatibility warnings", () => {
+test("artifact store uses sharedState as mirror only and does not seed legacy inputs", () => {
   const sharedState = {
     proposals: [{ name: "protective-put", reason: "legacy proposal" }],
     tradeThesis: {
@@ -31,9 +38,34 @@ test("artifact store reports legacy sharedState seeding as compatibility warning
   };
 
   const artifacts = createArtifactStore(undefined, sharedState);
-  const warnings = artifacts.legacyWarnings();
-  assert.ok(warnings.some((warning) => warning.includes("proposals")));
-  assert.ok(warnings.some((warning) => warning.includes("tradeThesis")));
+  assert.equal(artifacts.has("planning.proposals"), false);
+  assert.equal(artifacts.has("trade.thesis"), false);
+
+  putArtifact(artifacts, {
+    key: "trade.thesis",
+    version: 2,
+    producer: "test",
+    data: {
+      directionalRegime: "sideways",
+      volState: "normal",
+      tailRiskState: "normal",
+      hedgeBias: "collar",
+      conviction: 45,
+      riskBudget: {
+        maxSingleOrderUsd: 4_000,
+        maxPremiumSpendUsd: 500,
+        maxMarginUseUsd: 2_000,
+        maxCorrelationBucketPct: 35,
+      },
+      disciplineState: "normal",
+      preferredStrategies: ["collar"],
+      decisionNotes: [],
+      ruleRefs: [],
+      doctrineRefs: [],
+    },
+  });
+
+  assert.equal(sharedState.tradeThesis.hedgeBias, "collar");
 });
 
 test("artifact contracts reject invalid canonical payloads", () => {
@@ -332,6 +364,169 @@ test("loadArtifactSnapshot rejects legacy raw artifact snapshots", async () => {
     );
 
     await assert.rejects(() => loadArtifactSnapshot(runId), /unsupported legacy format|archive dev state/i);
+  } finally {
+    await rm(runDir, { recursive: true, force: true });
+  }
+});
+
+test("saveRun writes current trace/policy/execution envelopes", async () => {
+  const runId = `run_persistence_envelopes_${Date.now()}`;
+
+  const record = {
+    kind: "trademesh-run",
+    version: 1,
+    id: runId,
+    goal: "validate persistence envelopes",
+    plane: "demo",
+    status: "ready",
+    route: ["portfolio-xray", "replay"],
+    trace: [
+      {
+        skill: "portfolio-xray",
+        stage: "sensor",
+        goal: "validate persistence envelopes",
+        summary: "snapshot",
+        facts: [],
+        constraints: {},
+        proposal: [],
+        risk: { score: 0, maxLoss: "n/a", needsApproval: false, reasons: [] },
+        permissions: { plane: "demo", officialWriteOnly: true, allowedModules: [] },
+        handoff: "replay",
+        timestamp: "2026-03-21T10:00:00.000Z",
+      },
+    ],
+    facts: [],
+    constraints: {},
+    proposals: [],
+    risk: { score: 0, maxLoss: "n/a", needsApproval: false, reasons: [] },
+    permissions: { plane: "demo", officialWriteOnly: true, allowedModules: [] },
+    capabilitySnapshot: {
+      okxCliAvailable: true,
+      configPath: "profiles",
+      configExists: true,
+      demoProfileLikelyConfigured: true,
+      liveProfileLikelyConfigured: false,
+      warnings: [],
+    },
+    policyDecision: {
+      outcome: "approved",
+      reasons: [],
+      proposal: "protective-put",
+      plane: "demo",
+      executeRequested: false,
+      approvalProvided: true,
+      evaluatedAt: "2026-03-21T10:00:00.000Z",
+      phase: "plan",
+      ruleRefs: [],
+      doctrineRefs: [],
+      breachFlags: [],
+    },
+    approved: true,
+    executions: [],
+    errors: [],
+    notes: [],
+    createdAt: "2026-03-21T10:00:00.000Z",
+    updatedAt: "2026-03-21T10:00:00.000Z",
+  };
+
+  try {
+    await saveRun(record);
+
+    const trace = await loadTraceEnvelope(runId);
+    const policy = await loadPolicyEnvelope(runId);
+    const execution = await loadExecutionEnvelope(runId);
+
+    assert.equal(trace?.kind, "trademesh-trace");
+    assert.equal(trace?.version, 2);
+    assert.equal(policy?.kind, "trademesh-policy");
+    assert.equal(policy?.version, 2);
+    assert.equal(execution?.kind, "trademesh-executions");
+    assert.equal(execution?.version, 2);
+  } finally {
+    await rm(join(process.cwd(), "runs", `${runId}.json`), { force: true });
+    await rm(join(process.cwd(), ".trademesh", "runs", runId), { recursive: true, force: true });
+  }
+});
+
+test("loadTraceEnvelope rejects legacy trace snapshots", async () => {
+  const runId = `run_trace_legacy_${Date.now()}`;
+  const runDir = join(process.cwd(), ".trademesh", "runs", runId);
+  await mkdir(runDir, { recursive: true });
+
+  try {
+    await writeFile(
+      join(runDir, "trace.json"),
+      JSON.stringify(
+        {
+          runId,
+          goal: "legacy trace",
+          plane: "demo",
+          status: "ready",
+          createdAt: "2026-03-21T10:00:00.000Z",
+          updatedAt: "2026-03-21T10:00:00.000Z",
+          trace: [],
+          executions: [],
+          errors: [],
+        },
+        null,
+        2,
+      ),
+    );
+
+    await assert.rejects(() => loadTraceEnvelope(runId), /unsupported legacy format|version 2/i);
+  } finally {
+    await rm(runDir, { recursive: true, force: true });
+  }
+});
+
+test("loadPolicyEnvelope rejects legacy policy snapshots", async () => {
+  const runId = `run_policy_legacy_${Date.now()}`;
+  const runDir = join(process.cwd(), ".trademesh", "runs", runId);
+  await mkdir(runDir, { recursive: true });
+
+  try {
+    await writeFile(
+      join(runDir, "policy.json"),
+      JSON.stringify(
+        {
+          outcome: "approved",
+          reasons: [],
+          proposal: "protective-put",
+          plane: "demo",
+          executeRequested: false,
+          approvalProvided: true,
+          evaluatedAt: "2026-03-21T10:00:00.000Z",
+        },
+        null,
+        2,
+      ),
+    );
+
+    await assert.rejects(() => loadPolicyEnvelope(runId), /unsupported legacy format|version 2/i);
+  } finally {
+    await rm(runDir, { recursive: true, force: true });
+  }
+});
+
+test("loadExecutionEnvelope rejects legacy execution snapshots", async () => {
+  const runId = `run_execution_legacy_${Date.now()}`;
+  const runDir = join(process.cwd(), ".trademesh", "runs", runId);
+  await mkdir(runDir, { recursive: true });
+
+  try {
+    await writeFile(
+      join(runDir, "executions.json"),
+      JSON.stringify(
+        {
+          executions: [],
+          errors: [],
+        },
+        null,
+        2,
+      ),
+    );
+
+    await assert.rejects(() => loadExecutionEnvelope(runId), /unsupported legacy format|version 2/i);
   } finally {
     await rm(runDir, { recursive: true, force: true });
   }

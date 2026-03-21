@@ -345,10 +345,6 @@ function latestTraceEntry(trace: SkillOutput[], skillName: string): SkillOutput 
   return [...trace].reverse().find((entry) => entry.skill === skillName);
 }
 
-function compatibilityNotes(artifacts: ArtifactStore): string[] {
-  return artifacts.legacyWarnings().map((warning) => `Compatibility warning: ${warning}`);
-}
-
 function proposalsFromArtifacts(artifacts: ArtifactStore): SkillProposal[] {
   const artifact = artifacts.get<SkillProposal[]>("planning.proposals")?.data;
   return Array.isArray(artifact) ? artifact.map(normalizeProposal) : [];
@@ -640,7 +636,6 @@ export async function createPlan(goal: string, options: PlanOptions): Promise<Ru
       "Use apply --proposal <name> to select an execution path.",
       "Use --approve and --execute for explicit write execution.",
       `Initial plane: ${options.plane}`,
-      ...compatibilityNotes(artifacts),
     ],
     createdAt: now(),
     updatedAt: now(),
@@ -757,7 +752,6 @@ export async function applyRun(runId: string, options: ApplyOptions): Promise<Ru
       ...baseRecord.notes,
       `Apply ${status}: ${decision.reasons.join(" | ")}`,
       ...(executionOutcome.errors.length > 0 ? [`Execution errors recorded: ${executionOutcome.errors.length}`] : []),
-      ...compatibilityNotes(artifacts),
     ],
     updatedAt: now(),
   });
@@ -803,7 +797,6 @@ export async function replayRun(runId: string, options: ReplayOptions = {}): Pro
     runtimeInput: {
       skillFilter: options.skill,
       latestExecutionResults: record.executions.at(-1)?.results ?? [],
-      compatibilityWarnings: artifacts.legacyWarnings(),
     },
     sharedState,
   });
@@ -970,7 +963,6 @@ export function formatReplay(record: RunRecord): string {
     const timelineRaw = replayEntry.metadata?.timeline;
     const artifactRaw = replayEntry.metadata?.artifacts;
     const evidenceRaw = replayEntry.metadata?.evidence;
-    const compatibilityRaw = replayEntry.metadata?.compatibilityWarnings;
     if (Array.isArray(timelineRaw) && timelineRaw.length > 0) {
       lines.push("");
       lines.push("timeline:");
@@ -985,11 +977,6 @@ export function formatReplay(record: RunRecord): string {
       lines.push("");
       lines.push("evidence:");
       lines.push(...evidenceRaw.filter((item): item is string => typeof item === "string").map((item) => `- ${item}`));
-    }
-    if (Array.isArray(compatibilityRaw) && compatibilityRaw.length > 0) {
-      lines.push("");
-      lines.push("compatibility:");
-      lines.push(...compatibilityRaw.filter((item): item is string => typeof item === "string").map((item) => `- ${item}`));
     }
   }
 

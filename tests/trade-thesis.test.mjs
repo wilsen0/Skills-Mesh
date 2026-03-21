@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { putArtifact } from "../dist/runtime/artifacts.js";
 import run from "../dist/skills/trade-thesis/run.js";
 import { createContext } from "./test-helpers.mjs";
 
@@ -45,13 +46,31 @@ test("trade-thesis converts market regime and portfolio risk into a canonical th
     },
   };
 
-  const output = await run(
-    createContext({
-      skill: "trade-thesis",
-      stage: "planner",
-      sharedState,
-    }),
-  );
+  const context = createContext({
+    skill: "trade-thesis",
+    stage: "planner",
+    sharedState,
+  });
+  putArtifact(context.artifacts, {
+    key: "portfolio.snapshot",
+    version: 2,
+    producer: "portfolio-xray",
+    data: sharedState.portfolioSnapshot,
+  });
+  putArtifact(context.artifacts, {
+    key: "portfolio.risk-profile",
+    version: 2,
+    producer: "portfolio-xray",
+    data: sharedState.portfolioRiskProfile,
+  });
+  putArtifact(context.artifacts, {
+    key: "market.regime",
+    version: 2,
+    producer: "market-scan",
+    data: sharedState.marketRegime,
+  });
+
+  const output = await run(context);
 
   assert.equal(output.skill, "trade-thesis");
   assert.equal(output.stage, "planner");

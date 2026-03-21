@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { putArtifact } from "../dist/runtime/artifacts.js";
 import run from "../dist/skills/official-executor/run.js";
 import { buildReferencePayloads, createContext, withMockOkx } from "./test-helpers.mjs";
 
@@ -7,7 +8,6 @@ test("official-executor materializes protective-put option place-order command",
   const payloads = await buildReferencePayloads();
   await withMockOkx(payloads, async () => {
     const sharedState = {
-      selectedProposal: "protective-put",
       proposals: [
         {
           name: "protective-put",
@@ -63,14 +63,32 @@ test("official-executor materializes protective-put option place-order command",
         doctrineRefs: ["vol-hedging"],
       },
     };
-    const output = await run(
-      createContext({
-        skill: "official-executor",
-        stage: "executor",
-        sharedState,
-        runtimeInput: { selectedProposal: "protective-put" },
-      }),
-    );
+    const context = createContext({
+      skill: "official-executor",
+      stage: "executor",
+      sharedState,
+      runtimeInput: { selectedProposal: "protective-put" },
+    });
+    putArtifact(context.artifacts, {
+      key: "planning.proposals",
+      version: 2,
+      producer: "hedge-planner",
+      data: sharedState.proposals,
+    });
+    putArtifact(context.artifacts, {
+      key: "policy.plan-decision",
+      version: 2,
+      producer: "policy-gate",
+      data: sharedState.policyPlanDecision,
+    });
+    putArtifact(context.artifacts, {
+      key: "trade.thesis",
+      version: 2,
+      producer: "trade-thesis",
+      data: sharedState.tradeThesis,
+    });
+
+    const output = await run(context);
 
     const preview = Array.isArray(output.metadata?.commandPreview) ? output.metadata.commandPreview : [];
     const optionCommands = preview.filter(

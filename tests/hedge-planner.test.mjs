@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { putArtifact } from "../dist/runtime/artifacts.js";
 import run from "../dist/skills/hedge-planner/run.js";
 import { buildReferencePayloads, createContext } from "./test-helpers.mjs";
 
@@ -57,13 +58,31 @@ test("hedge-planner emits proposal set with structured intents/order plans", asy
     },
   };
 
-  const output = await run(
-    createContext({
-      skill: "hedge-planner",
-      stage: "planner",
-      sharedState,
-    }),
-  );
+  const context = createContext({
+    skill: "hedge-planner",
+    stage: "planner",
+    sharedState,
+  });
+  putArtifact(context.artifacts, {
+    key: "portfolio.risk-profile",
+    version: 2,
+    producer: "portfolio-xray",
+    data: sharedState.portfolioRiskProfile,
+  });
+  putArtifact(context.artifacts, {
+    key: "market.snapshot",
+    version: 2,
+    producer: "market-scan",
+    data: sharedState.marketSnapshot,
+  });
+  putArtifact(context.artifacts, {
+    key: "trade.thesis",
+    version: 2,
+    producer: "trade-thesis",
+    data: sharedState.tradeThesis,
+  });
+
+  const output = await run(context);
 
   assert.equal(output.skill, "hedge-planner");
   assert.equal(output.stage, "planner");

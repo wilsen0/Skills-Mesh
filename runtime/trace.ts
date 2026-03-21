@@ -1,10 +1,12 @@
 import { existsSync, promises as fs } from "node:fs";
 import { join } from "node:path";
 import { getProjectPaths } from "./paths.js";
-import { validateArtifactSnapshot } from "./contracts.js";
-import type { ArtifactSnapshot, RunErrorRecord, RunRecord, SkillOutput } from "./types.js";
+import { validateArtifactSnapshot, validatePolicyDecision } from "./contracts.js";
+import type { ArtifactSnapshot, ExecutionPlane, RunErrorRecord, RunRecord, SkillOutput } from "./types.js";
 
 export interface TraceEnvelope {
+  kind: "trademesh-trace";
+  version: 2;
   runId: string;
   goal: string;
   plane: RunRecord["plane"];
@@ -18,8 +20,20 @@ export interface TraceEnvelope {
 }
 
 export interface ExecutionEnvelope {
+  kind: "trademesh-executions";
+  version: 2;
+  runId: string;
+  savedAt: string;
   executions: RunRecord["executions"];
   errors: RunErrorRecord[];
+}
+
+export interface PolicyEnvelope {
+  kind: "trademesh-policy";
+  version: 2;
+  runId: string;
+  savedAt: string;
+  decision: RunRecord["policyDecision"] | null;
 }
 
 interface ArtifactSnapshotEnvelope {
@@ -32,6 +46,71 @@ interface ArtifactSnapshotEnvelope {
 
 function timestampPrefix(date = new Date()): string {
   return date.toISOString().replace(/[-:TZ.]/g, "").slice(0, 17);
+}
+
+function invariant(condition: unknown, message: string): asserts condition {
+  if (!condition) {
+    throw new Error(message);
+  }
+}
+
+function isObject(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
+function isPlane(value: unknown): value is ExecutionPlane {
+  return value === "research" || value === "demo" || value === "live";
+}
+
+function isStatus(value: unknown): value is RunRecord["status"] {
+  return (
+    value === "planned" ||
+    value === "approval_required" ||
+    value === "ready" ||
+    value === "blocked" ||
+    value === "dry_run" ||
+    value === "executed" ||
+    value === "failed" ||
+    value === "previewed"
+  );
+}
+
+function validateTraceEnvelopePayload(parsed: unknown, runId: string): TraceEnvelope {
+  invariant(isObject(parsed), `Trace snapshot for run '${runId}' must be an object.`);
+  invariant(parsed.kind === "trademesh-trace", `Trace snapshot for run '${runId}' uses an unsupported legacy format.`);
+  invariant(parsed.version === 2, `Trace snapshot for run '${runId}' must use version 2.`);
+  invariant(typeof parsed.runId === "string" && parsed.runId.length > 0, `Trace snapshot for run '${runId}' is missing runId.`);
+  invariant(typeof parsed.goal === "string", `Trace snapshot for run '${runId}' is missing goal.`);
+  invariant(isPlane(parsed.plane), `Trace snapshot for run '${runId}' has an invalid plane.`);
+  invariant(isStatus(parsed.status), `Trace snapshot for run '${runId}' has an invalid status.`);
+  invariant(typeof parsed.createdAt === "string", `Trace snapshot for run '${runId}' is missing createdAt.`);
+  invariant(typeof parsed.updatedAt === "string", `Trace snapshot for run '${runId}' is missing updatedAt.`);
+  invariant(Array.isArray(parsed.trace), `Trace snapshot for run '${runId}' must contain a trace array.`);
+  invariant(Array.isArray(parsed.executions), `Trace snapshot for run '${runId}' must contain an executions array.`);
+  invariant(Array.isArray(parsed.errors), `Trace snapshot for run '${runId}' must contain an errors array.`);
+  validatePolicyDecision((parsed.policyDecision as RunRecord["policyDecision"]) ?? undefined);
+  return parsed as unknown as TraceEnvelope;
+}
+
+function validatePolicyEnvelopePayload(parsed: unknown, runId: string): PolicyEnvelope {
+  invariant(isObject(parsed), `Policy snapshot for run '${runId}' must be an object.`);
+  invariant(parsed.kind === "trademesh-policy", `Policy snapshot for run '${runId}' uses an unsupported legacy format.`);
+  invariant(parsed.version === 2, `Policy snapshot for run '${runId}' must use version 2.`);
+  invariant(typeof parsed.runId === "string" && parsed.runId.length > 0, `Policy snapshot for run '${runId}' is missing runId.`);
+  invariant(typeof parsed.savedAt === "string", `Policy snapshot for run '${runId}' is missing savedAt.`);
+  validatePolicyDecision((parsed.decision as RunRecord["policyDecision"]) ?? null);
+  return parsed as unknown as PolicyEnvelope;
+}
+
+function validateExecutionEnvelopePayload(parsed: unknown, runId: string): ExecutionEnvelope {
+  invariant(isObject(parsed), `Execution snapshot for run '${runId}' must be an object.`);
+  invariant(parsed.kind === "trademesh-executions", `Execution snapshot for run '${runId}' uses an unsupported legacy format.`);
+  invariant(parsed.version === 2, `Execution snapshot for run '${runId}' must use version 2.`);
+  invariant(typeof parsed.runId === "string" && parsed.runId.length > 0, `Execution snapshot for run '${runId}' is missing runId.`);
+  invariant(typeof parsed.savedAt === "string", `Execution snapshot for run '${runId}' is missing savedAt.`);
+  invariant(Array.isArray(parsed.executions), `Execution snapshot for run '${runId}' must contain an executions array.`);
+  invariant(Array.isArray(parsed.errors), `Execution snapshot for run '${runId}' must contain an errors array.`);
+  return parsed as unknown as ExecutionEnvelope;
 }
 
 export async function ensureRunsDirectory(): Promise<void> {
@@ -60,6 +139,8 @@ async function ensureMeshRunDirectory(runId: string): Promise<string> {
 
 function buildTraceEnvelope(record: RunRecord): TraceEnvelope {
   return {
+    kind: "trademesh-trace",
+    version: 2,
     runId: record.id,
     goal: record.goal,
     plane: record.plane,
@@ -70,6 +151,27 @@ function buildTraceEnvelope(record: RunRecord): TraceEnvelope {
     executions: record.executions,
     errors: record.errors ?? [],
     policyDecision: record.policyDecision,
+  };
+}
+
+function buildPolicyEnvelope(record: RunRecord): PolicyEnvelope {
+  return {
+    kind: "trademesh-policy",
+    version: 2,
+    runId: record.id,
+    savedAt: new Date().toISOString(),
+    decision: record.policyDecision ?? null,
+  };
+}
+
+function buildExecutionEnvelope(record: RunRecord): ExecutionEnvelope {
+  return {
+    kind: "trademesh-executions",
+    version: 2,
+    runId: record.id,
+    savedAt: new Date().toISOString(),
+    executions: record.executions,
+    errors: record.errors ?? [],
   };
 }
 
@@ -93,12 +195,12 @@ export async function saveRun(record: RunRecord): Promise<void> {
   await fs.writeFile(tracePath, `${JSON.stringify(envelope, null, 2)}\n`, "utf8");
 
   const policyPath = join(runDir, "policy.json");
-  await fs.writeFile(policyPath, `${JSON.stringify(record.policyDecision ?? null, null, 2)}\n`, "utf8");
+  await fs.writeFile(policyPath, `${JSON.stringify(buildPolicyEnvelope(record), null, 2)}\n`, "utf8");
 
   const executionPath = join(runDir, "executions.json");
   await fs.writeFile(
     executionPath,
-    `${JSON.stringify({ executions: record.executions, errors: record.errors ?? [] }, null, 2)}\n`,
+    `${JSON.stringify(buildExecutionEnvelope(record), null, 2)}\n`,
     "utf8",
   );
 }
@@ -114,34 +216,12 @@ export async function loadTraceEnvelope(runId: string): Promise<TraceEnvelope | 
   const { meshRunsRoot } = getProjectPaths();
   const tracePath = join(meshRunsRoot, runId, "trace.json");
 
-  if (existsSync(tracePath)) {
-    const contents = await fs.readFile(tracePath, "utf8");
-    const parsed = JSON.parse(contents) as Partial<TraceEnvelope>;
-    if (parsed && Array.isArray(parsed.trace)) {
-      return {
-        runId: typeof parsed.runId === "string" ? parsed.runId : runId,
-        goal: typeof parsed.goal === "string" ? parsed.goal : "",
-        plane:
-          parsed.plane === "research" || parsed.plane === "demo" || parsed.plane === "live"
-            ? parsed.plane
-            : "research",
-        status: typeof parsed.status === "string" ? (parsed.status as RunRecord["status"]) : "planned",
-        createdAt: typeof parsed.createdAt === "string" ? parsed.createdAt : "",
-        updatedAt: typeof parsed.updatedAt === "string" ? parsed.updatedAt : "",
-        trace: parsed.trace,
-        executions: Array.isArray(parsed.executions) ? parsed.executions : [],
-        errors: Array.isArray(parsed.errors) ? parsed.errors : [],
-        policyDecision: parsed.policyDecision,
-      };
-    }
-  }
-
-  try {
-    const run = await loadRun(runId);
-    return buildTraceEnvelope(run);
-  } catch {
+  if (!existsSync(tracePath)) {
     return null;
   }
+
+  const contents = await fs.readFile(tracePath, "utf8");
+  return validateTraceEnvelopePayload(JSON.parse(contents), runId);
 }
 
 export async function saveArtifactSnapshot(runId: string, snapshot: ArtifactSnapshot): Promise<void> {
@@ -184,6 +264,17 @@ export async function loadArtifactSnapshot(runId: string): Promise<ArtifactSnaps
   );
 }
 
+export async function loadPolicyEnvelope(runId: string): Promise<PolicyEnvelope | null> {
+  const { meshRunsRoot } = getProjectPaths();
+  const policyPath = join(meshRunsRoot, runId, "policy.json");
+  if (!existsSync(policyPath)) {
+    return null;
+  }
+
+  const contents = await fs.readFile(policyPath, "utf8");
+  return validatePolicyEnvelopePayload(JSON.parse(contents), runId);
+}
+
 export async function loadExecutionEnvelope(runId: string): Promise<ExecutionEnvelope | null> {
   const { meshRunsRoot } = getProjectPaths();
   const executionPath = join(meshRunsRoot, runId, "executions.json");
@@ -192,11 +283,7 @@ export async function loadExecutionEnvelope(runId: string): Promise<ExecutionEnv
   }
 
   const contents = await fs.readFile(executionPath, "utf8");
-  const parsed = JSON.parse(contents) as Partial<ExecutionEnvelope>;
-  return {
-    executions: Array.isArray(parsed.executions) ? parsed.executions : [],
-    errors: Array.isArray(parsed.errors) ? parsed.errors : [],
-  };
+  return validateExecutionEnvelopePayload(JSON.parse(contents), runId);
 }
 
 export async function loadTraceEntries(runId: string): Promise<SkillOutput[]> {

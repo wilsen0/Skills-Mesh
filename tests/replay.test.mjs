@@ -73,6 +73,8 @@ async function writeReplayFixture(runId) {
     join(runDir, "trace.json"),
     JSON.stringify(
       {
+        kind: "trademesh-trace",
+        version: 2,
         runId,
         goal: "demo goal",
         plane: "demo",
@@ -80,6 +82,49 @@ async function writeReplayFixture(runId) {
         createdAt: "2026-03-20T09:00:00.000Z",
         updatedAt: "2026-03-20T09:03:00.000Z",
         trace,
+        executions: [],
+        errors: [],
+      },
+      null,
+      2,
+    ),
+  );
+
+  await writeFile(
+    join(runDir, "policy.json"),
+    JSON.stringify(
+      {
+        kind: "trademesh-policy",
+        version: 2,
+        runId,
+        savedAt: "2026-03-20T09:02:00.000Z",
+        decision: {
+          outcome: "approved",
+          reasons: ["Demo proposal passed dynamic policy checks."],
+          proposal: "protective-put",
+          plane: "demo",
+          executeRequested: false,
+          approvalProvided: true,
+          evaluatedAt: "2026-03-20T09:02:00.000Z",
+          phase: "plan",
+          ruleRefs: ["risk-limits"],
+          doctrineRefs: ["discipline"],
+          breachFlags: [],
+        },
+      },
+      null,
+      2,
+    ),
+  );
+
+  await writeFile(
+    join(runDir, "executions.json"),
+    JSON.stringify(
+      {
+        kind: "trademesh-executions",
+        version: 2,
+        runId,
+        savedAt: "2026-03-20T09:03:00.000Z",
         executions: [],
         errors: [],
       },

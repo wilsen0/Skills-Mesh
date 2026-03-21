@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { putArtifact } from "../dist/runtime/artifacts.js";
 import run from "../dist/skills/scenario-sim/run.js";
 import { createContext } from "./test-helpers.mjs";
 
@@ -54,13 +55,31 @@ test("scenario-sim enriches proposals with the fixed scenario matrix", async () 
     },
   };
 
-  const output = await run(
-    createContext({
-      skill: "scenario-sim",
-      stage: "planner",
-      sharedState,
-    }),
-  );
+  const context = createContext({
+    skill: "scenario-sim",
+    stage: "planner",
+    sharedState,
+  });
+  putArtifact(context.artifacts, {
+    key: "planning.proposals",
+    version: 2,
+    producer: "hedge-planner",
+    data: sharedState.proposals,
+  });
+  putArtifact(context.artifacts, {
+    key: "trade.thesis",
+    version: 2,
+    producer: "trade-thesis",
+    data: sharedState.tradeThesis,
+  });
+  putArtifact(context.artifacts, {
+    key: "portfolio.risk-profile",
+    version: 2,
+    producer: "portfolio-xray",
+    data: sharedState.portfolioRiskProfile,
+  });
+
+  const output = await run(context);
 
   assert.equal(output.skill, "scenario-sim");
   assert.equal(output.proposal.length, 1);

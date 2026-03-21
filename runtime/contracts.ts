@@ -85,6 +85,14 @@ function validatePolicyDecisionLike(data: unknown, key: ArtifactKey): void {
   }
 }
 
+export function validatePolicyDecision<T extends PolicyDecision | null | undefined>(decision: T): T {
+  if (decision === null || decision === undefined) {
+    return decision;
+  }
+  validatePolicyDecisionLike(decision, "policy.plan-decision");
+  return decision;
+}
+
 export function validateArtifactData(key: ArtifactKey, data: unknown): void {
   if (key === "planning.proposals") {
     invariant(Array.isArray(data), `Artifact '${key}' must be an array.`);

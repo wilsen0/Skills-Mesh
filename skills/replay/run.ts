@@ -1,4 +1,4 @@
-import { loadArtifactSnapshot, loadExecutionEnvelope, loadTraceEnvelope } from "../../runtime/trace.js";
+import { loadArtifactSnapshot, loadExecutionEnvelope, loadPolicyEnvelope, loadTraceEnvelope } from "../../runtime/trace.js";
 import type {
   ArtifactKey,
   ArtifactSnapshot,
@@ -121,6 +121,7 @@ export default async function run(context: SkillContext): Promise<SkillOutput> {
   const runtimeInput = context.runtimeInput as Record<string, unknown>;
   const skillFilter = readSkillFilter(runtimeInput);
   const traceEnvelope = await loadTraceEnvelope(context.runId);
+  const policyEnvelope = await loadPolicyEnvelope(context.runId);
   const executionEnvelope = await loadExecutionEnvelope(context.runId);
   const artifactSnapshot = await loadArtifactSnapshot(context.runId);
   const baseTrace = stableTrace(traceEnvelope?.trace ?? context.trace);
@@ -130,14 +131,12 @@ export default async function run(context: SkillContext): Promise<SkillOutput> {
   const replayTrace = filteredTrace.length > 0 ? filteredTrace : baseTrace;
   const latestDecision = (context.artifacts.get<PolicyDecision>("execution.apply-decision")?.data ??
     context.artifacts.get<PolicyDecision>("policy.plan-decision")?.data ??
+    policyEnvelope?.decision ??
     traceEnvelope?.policyDecision) as PolicyDecision | undefined;
   const latestResults = executionEnvelope?.executions.at(-1)?.results ?? normalizeExecutionResults(runtimeInput.latestExecutionResults);
   const artifactLines = summarizeArtifacts(artifactSnapshot);
   const evidenceLines = summarizeEvidence(replayTrace);
   const chain = timeline(replayTrace);
-  const compatibilityWarnings = Array.isArray(runtimeInput.compatibilityWarnings)
-    ? runtimeInput.compatibilityWarnings.filter((item): item is string => typeof item === "string")
-    : [];
 
   const facts = [
     `Replay entries: ${replayTrace.length}${skillFilter ? ` (skill filter: ${skillFilter})` : ""}.`,
@@ -145,9 +144,6 @@ export default async function run(context: SkillContext): Promise<SkillOutput> {
     summarizePolicy(latestDecision),
     `Executions recorded: ${latestResults.length}.`,
   ];
-  if (compatibilityWarnings.length > 0) {
-    facts.push(`Compatibility warnings: ${compatibilityWarnings.length}.`);
-  }
 
   if (filteredTrace.length === 0 && skillFilter) {
     facts.push(`No trace entries matched --skill ${skillFilter}; replay used the full trace.`);
@@ -185,7 +181,6 @@ export default async function run(context: SkillContext): Promise<SkillOutput> {
       policyDecision: latestDecision ?? null,
       latestExecutionCount: latestResults.length,
       traceLoadedFromFile: Boolean(traceEnvelope),
-      compatibilityWarnings,
     },
     timestamp: new Date().toISOString(),
   };

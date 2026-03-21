@@ -2,14 +2,10 @@ import type {
   ArtifactKey,
   ArtifactSnapshot,
   ArtifactStore,
-  PolicyDecision,
-  PortfolioRiskProfile,
   PortfolioSnapshot,
   SkillArtifact,
-  SkillProposal,
-  TradeThesis,
 } from "./types.js";
-import { validateArtifactData, validateArtifactEnvelope, validateArtifactSnapshot } from "./contracts.js";
+import { validateArtifactEnvelope, validateArtifactSnapshot } from "./contracts.js";
 import { currentArtifactVersion } from "./artifact-schema.js";
 
 const ARTIFACT_TO_SHARED_STATE: Partial<Record<ArtifactKey, string[]>> = {
@@ -69,51 +65,8 @@ function mirrorArtifactToSharedState(
   }
 }
 
-function buildLegacyArtifact(
-  key: ArtifactKey,
-  data: unknown,
-): SkillArtifact<unknown> {
-  validateArtifactData(key, data);
-  return {
-    key,
-    version: currentArtifactVersion(key),
-    producer: "legacy-shared-state",
-    createdAt: new Date().toISOString(),
-    data,
-    ruleRefs: [],
-    doctrineRefs: [],
-  };
-}
-
-function seedFromSharedState(
-  sharedState: Record<string, unknown>,
-  store: Map<ArtifactKey, SkillArtifact<unknown>>,
-): string[] {
-  const warnings: string[] = [];
-  const seed = <T>(key: ArtifactKey, data: T | undefined, sourceLabel: string): void => {
-    if (data === undefined || store.has(key)) {
-      return;
-    }
-    store.set(key, buildLegacyArtifact(key, data));
-    warnings.push(`Legacy sharedState input '${sourceLabel}' seeded artifact '${key}'.`);
-  };
-
-  seed("portfolio.snapshot", sharedState.portfolioSnapshot ?? sharedState.accountSnapshot, "portfolioSnapshot/accountSnapshot");
-  seed("portfolio.risk-profile", sharedState.portfolioRiskProfile as PortfolioRiskProfile | undefined, "portfolioRiskProfile");
-  seed("market.snapshot", sharedState.marketSnapshot, "marketSnapshot");
-  seed("market.regime", sharedState.marketRegime, "marketRegime");
-  seed("trade.thesis", sharedState.tradeThesis as TradeThesis | undefined, "tradeThesis");
-  seed("planning.proposals", sharedState.proposals as SkillProposal[] | undefined, "proposals");
-  seed("planning.scenario-matrix", sharedState.scenarioMatrix, "scenarioMatrix");
-  seed("policy.plan-decision", sharedState.policyPlanDecision as PolicyDecision | undefined, "policyPlanDecision");
-  seed("execution.intent-bundle", sharedState.executionIntentBundle, "executionIntentBundle");
-  seed("execution.apply-decision", sharedState.applyDecision, "applyDecision");
-  return warnings;
-}
-
 class InMemoryArtifactStore implements ArtifactStore {
   private readonly store = new Map<ArtifactKey, SkillArtifact<unknown>>();
-  private readonly compatibilityWarnings: string[] = [];
 
   constructor(
     initialSnapshot?: ArtifactSnapshot,
@@ -130,7 +83,6 @@ class InMemoryArtifactStore implements ArtifactStore {
     }
 
     if (this.sharedState) {
-      this.compatibilityWarnings.push(...seedFromSharedState(this.sharedState, this.store));
       for (const artifact of this.store.values()) {
         mirrorArtifactToSharedState(artifact.key, artifact.data, this.sharedState);
       }
@@ -174,10 +126,6 @@ class InMemoryArtifactStore implements ArtifactStore {
       snapshot[artifact.key] = cloneArtifact(artifact);
     }
     return snapshot;
-  }
-
-  legacyWarnings(): string[] {
-    return [...this.compatibilityWarnings];
   }
 }
 
