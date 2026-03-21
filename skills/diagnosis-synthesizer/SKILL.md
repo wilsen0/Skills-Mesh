@@ -13,7 +13,7 @@ consumes: [diagnostics.probes]
 produces: [diagnostics.readiness]
 preferred_handoffs: [rehearsal-planner]
 repeatable: true
-artifact_version: 2
+artifact_version: 3
 standalone_command: "trademesh skills run diagnosis-synthesizer \"<goal>\" --plane demo"
 standalone_route: [env-probe, market-probe, account-probe, diagnosis-synthesizer]
 standalone_inputs: [goal]

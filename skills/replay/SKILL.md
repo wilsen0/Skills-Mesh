@@ -13,7 +13,7 @@ consumes: []
 produces: []
 preferred_handoffs: []
 repeatable: false
-artifact_version: 2
+artifact_version: 3
 standalone_command: "trademesh skills run replay \"<goal>\" --input <run-id>"
 standalone_route: [replay]
 standalone_inputs: [run-id]

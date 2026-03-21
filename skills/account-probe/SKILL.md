@@ -13,7 +13,7 @@ consumes: [diagnostics.probes]
 produces: [diagnostics.probes, goal.intake, portfolio.snapshot, portfolio.risk-profile]
 preferred_handoffs: [diagnosis-synthesizer]
 repeatable: true
-artifact_version: 2
+artifact_version: 3
 standalone_command: "trademesh skills run account-probe \"<goal>\" --plane demo"
 standalone_route: [env-probe, market-probe, account-probe]
 standalone_inputs: [goal]

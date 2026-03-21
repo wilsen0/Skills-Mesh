@@ -13,7 +13,7 @@ consumes: []
 produces: [goal.intake, portfolio.snapshot, portfolio.risk-profile]
 preferred_handoffs: [market-scan]
 repeatable: false
-artifact_version: 2
+artifact_version: 3
 standalone_command: "trademesh skills run portfolio-xray \"<goal>\""
 standalone_route: [portfolio-xray]
 standalone_inputs: [goal]

@@ -13,7 +13,7 @@ consumes: [portfolio.snapshot]
 produces: [market.snapshot, market.regime]
 preferred_handoffs: [trade-thesis]
 repeatable: false
-artifact_version: 2
+artifact_version: 3
 standalone_command: "trademesh skills run market-scan \"<goal>\""
 standalone_route: [portfolio-xray, market-scan]
 standalone_inputs: [goal]

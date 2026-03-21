@@ -13,7 +13,7 @@ consumes: [goal.intake, portfolio.snapshot, diagnostics.readiness, market.regime
 produces: [trade.thesis, planning.proposals, planning.scenario-matrix, operations.rehearsal-plan]
 preferred_handoffs: [policy-gate]
 repeatable: false
-artifact_version: 2
+artifact_version: 3
 standalone_command: "trademesh skills run rehearsal-planner \"<goal>\" --plane demo"
 standalone_route: [env-probe, market-probe, account-probe, diagnosis-synthesizer, rehearsal-planner]
 standalone_inputs: [goal]

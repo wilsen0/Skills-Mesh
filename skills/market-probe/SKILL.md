@@ -13,7 +13,7 @@ consumes: [diagnostics.probes]
 produces: [diagnostics.probes, market.snapshot, market.regime]
 preferred_handoffs: [account-probe]
 repeatable: true
-artifact_version: 2
+artifact_version: 3
 standalone_command: "trademesh skills run market-probe \"<goal>\" --plane demo"
 standalone_route: [env-probe, market-probe]
 standalone_inputs: [goal]

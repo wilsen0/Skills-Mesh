@@ -13,7 +13,7 @@ consumes: [goal.intake, trade.thesis, portfolio.risk-profile, market.snapshot]
 produces: [planning.proposals]
 preferred_handoffs: [scenario-sim]
 repeatable: false
-artifact_version: 2
+artifact_version: 3
 standalone_command: "trademesh skills run hedge-planner \"<goal>\""
 standalone_route: [portfolio-xray, market-scan, trade-thesis, hedge-planner]
 standalone_inputs: [goal]

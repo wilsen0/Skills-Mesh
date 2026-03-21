@@ -13,7 +13,7 @@ consumes: [policy.plan-decision, planning.proposals, goal.intake]
 produces: [approval.ticket]
 preferred_handoffs: [official-executor]
 repeatable: true
-artifact_version: 2
+artifact_version: 3
 standalone_command: "trademesh skills run approval-gate \"<goal>\""
 standalone_route: [portfolio-xray, market-scan, trade-thesis, hedge-planner, scenario-sim, policy-gate, approval-gate]
 standalone_inputs: [goal]

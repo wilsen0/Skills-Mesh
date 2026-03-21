@@ -13,7 +13,7 @@ consumes: [planning.proposals, trade.thesis, portfolio.risk-profile]
 produces: [planning.proposals, planning.scenario-matrix]
 preferred_handoffs: [policy-gate]
 repeatable: false
-artifact_version: 2
+artifact_version: 3
 standalone_command: "trademesh skills run scenario-sim \"<goal>\""
 standalone_route: [portfolio-xray, market-scan, trade-thesis, hedge-planner, scenario-sim]
 standalone_inputs: [goal]
