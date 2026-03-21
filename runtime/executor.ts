@@ -414,7 +414,7 @@ function hydrateRecord(record: HydrateInput): RunRecord {
 
   const hydrated: RunRecord = {
     ...record,
-    version: 2,
+    version: 3,
     status: normalizeStatus(record.status),
     routeKind: record.routeKind ?? "workflow",
     facts,
@@ -444,7 +444,7 @@ async function loadNormalizedRun(runId: string): Promise<RunRecord> {
 
   return hydrateRecord({
     kind: "trademesh-run",
-    version: 2,
+    version: 3,
     id: loaded.id,
     goal: loaded.goal,
     plane: loaded.plane,
@@ -982,7 +982,7 @@ export async function createPlan(goal: string, options: PlanOptions): Promise<Ru
 
   const record = hydrateRecord({
     kind: "trademesh-run",
-    version: 2,
+    version: 3,
     id: runId,
     goal,
     plane: options.plane,
@@ -1071,7 +1071,7 @@ export async function runSkillStandalone(
   const route = [...graph.route];
   const record = hydrateRecord({
     kind: "trademesh-run",
-    version: 2,
+    version: 3,
     id: runId,
     goal,
     plane: options.plane,
@@ -1738,7 +1738,7 @@ export async function rehearseDemo(options: RehearseOptions = {}): Promise<RunRe
 
   const record = hydrateRecord({
     kind: "trademesh-run",
-    version: 2,
+    version: 3,
     id: runId,
     goal: "rehearse demo write path",
     plane: "demo",

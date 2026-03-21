@@ -20,11 +20,13 @@ const ARTIFACT_KEYS: ArtifactKey[] = [
   "policy.plan-decision",
   "execution.intent-bundle",
   "execution.apply-decision",
+  "execution.idempotency-check",
   "approval.ticket",
   "execution.reconciliation",
   "report.operator-summary",
   "diagnostics.probes",
   "diagnostics.readiness",
+  "operations.live-guard",
   "operations.rehearsal-plan",
   "operations.rehearsal-receipt",
 ];
@@ -214,6 +216,39 @@ export function validateArtifactData(key: ArtifactKey, data: unknown): void {
     return;
   }
 
+  if (key === "execution.idempotency-check") {
+    const record = asObject(data);
+    invariant(record, `Artifact '${key}' must be an object.`);
+    if ("status" in record) {
+      invariant(
+        ["ok", "blocked_reconcile_required", "error"].includes(String(record.status)),
+        `Artifact '${key}.status' is invalid.`,
+      );
+    }
+    if ("items" in record) {
+      invariant(Array.isArray(record.items), `Artifact '${key}.items' must be an array.`);
+    }
+    return;
+  }
+
+  if (key === "operations.live-guard") {
+    const record = asObject(data);
+    invariant(record, `Artifact '${key}' must be an object.`);
+    if ("status" in record) {
+      invariant(
+        ["allowed", "blocked"].includes(String(record.status)),
+        `Artifact '${key}.status' is invalid.`,
+      );
+    }
+    if ("reasons" in record) {
+      invariant(Array.isArray(record.reasons), `Artifact '${key}.reasons' must be an array.`);
+    }
+    if ("nextAction" in record) {
+      invariant(hasString(record.nextAction), `Artifact '${key}.nextAction' must be a string.`);
+    }
+    return;
+  }
+
   if (key === "report.operator-summary") {
     const record = asObject(data);
     invariant(record, `Artifact '${key}' must be an object.`);
@@ -222,6 +257,9 @@ export function validateArtifactData(key: ArtifactKey, data: unknown): void {
     }
     if ("nextSafeAction" in record) {
       invariant(hasString(record.nextSafeAction), `Artifact '${key}.nextSafeAction' must be a string.`);
+    }
+    if ("requiresHumanAction" in record) {
+      invariant(typeof record.requiresHumanAction === "boolean", `Artifact '${key}.requiresHumanAction' must be a boolean.`);
     }
     return;
   }

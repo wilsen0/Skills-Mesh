@@ -431,6 +431,7 @@ export function createCommandIntent(
 }
 
 export function executeIntent(intent: OkxCommandIntent, execute: boolean): ExecutionResult {
+  const startedAtIso = new Date().toISOString();
   if (!execute) {
     return {
       intent,
@@ -440,6 +441,8 @@ export function executeIntent(intent: OkxCommandIntent, execute: boolean): Execu
       stderr: "",
       skipped: true,
       dryRun: true,
+      startedAt: startedAtIso,
+      finishedAt: startedAtIso,
       durationMs: 0,
     };
   }
@@ -454,6 +457,8 @@ export function executeIntent(intent: OkxCommandIntent, execute: boolean): Execu
       stderr: "Unable to parse command intent.",
       skipped: false,
       dryRun: false,
+      startedAt: startedAtIso,
+      finishedAt: startedAtIso,
       durationMs: 0,
     };
   }
@@ -484,6 +489,8 @@ export function executeIntent(intent: OkxCommandIntent, execute: boolean): Execu
     stderr,
     skipped: false,
     dryRun: false,
+    startedAt: startedAtIso,
+    finishedAt: new Date().toISOString(),
     durationMs,
   };
 }

@@ -6,7 +6,7 @@ import type { ArtifactSnapshot, ExecutionPlane, RunErrorRecord, RunRecord, Skill
 
 export interface TraceEnvelope {
   kind: "trademesh-trace";
-  version: 2;
+  version: 3;
   runId: string;
   goal: string;
   plane: RunRecord["plane"];
@@ -21,7 +21,7 @@ export interface TraceEnvelope {
 
 export interface ExecutionEnvelope {
   kind: "trademesh-executions";
-  version: 2;
+  version: 3;
   runId: string;
   savedAt: string;
   executions: RunRecord["executions"];
@@ -30,7 +30,7 @@ export interface ExecutionEnvelope {
 
 export interface PolicyEnvelope {
   kind: "trademesh-policy";
-  version: 2;
+  version: 3;
   runId: string;
   savedAt: string;
   decision: RunRecord["policyDecision"] | null;
@@ -38,7 +38,7 @@ export interface PolicyEnvelope {
 
 interface ArtifactSnapshotEnvelope {
   kind: "trademesh-artifacts";
-  version: 2;
+  version: 3;
   runId: string;
   savedAt: string;
   artifacts: ArtifactSnapshot;
@@ -78,7 +78,7 @@ function isStatus(value: unknown): value is RunRecord["status"] {
 function validateTraceEnvelopePayload(parsed: unknown, runId: string): TraceEnvelope {
   invariant(isObject(parsed), `Trace snapshot for run '${runId}' must be an object.`);
   invariant(parsed.kind === "trademesh-trace", `Trace snapshot for run '${runId}' uses an unsupported legacy format.`);
-  invariant(parsed.version === 2, `Trace snapshot for run '${runId}' must use version 2.`);
+  invariant(parsed.version === 3, `Trace snapshot for run '${runId}' must use version 3.`);
   invariant(typeof parsed.runId === "string" && parsed.runId.length > 0, `Trace snapshot for run '${runId}' is missing runId.`);
   invariant(typeof parsed.goal === "string", `Trace snapshot for run '${runId}' is missing goal.`);
   invariant(isPlane(parsed.plane), `Trace snapshot for run '${runId}' has an invalid plane.`);
@@ -95,7 +95,7 @@ function validateTraceEnvelopePayload(parsed: unknown, runId: string): TraceEnve
 function validatePolicyEnvelopePayload(parsed: unknown, runId: string): PolicyEnvelope {
   invariant(isObject(parsed), `Policy snapshot for run '${runId}' must be an object.`);
   invariant(parsed.kind === "trademesh-policy", `Policy snapshot for run '${runId}' uses an unsupported legacy format.`);
-  invariant(parsed.version === 2, `Policy snapshot for run '${runId}' must use version 2.`);
+  invariant(parsed.version === 3, `Policy snapshot for run '${runId}' must use version 3.`);
   invariant(typeof parsed.runId === "string" && parsed.runId.length > 0, `Policy snapshot for run '${runId}' is missing runId.`);
   invariant(typeof parsed.savedAt === "string", `Policy snapshot for run '${runId}' is missing savedAt.`);
   validatePolicyDecision((parsed.decision as RunRecord["policyDecision"]) ?? null);
@@ -105,7 +105,7 @@ function validatePolicyEnvelopePayload(parsed: unknown, runId: string): PolicyEn
 function validateExecutionEnvelopePayload(parsed: unknown, runId: string): ExecutionEnvelope {
   invariant(isObject(parsed), `Execution snapshot for run '${runId}' must be an object.`);
   invariant(parsed.kind === "trademesh-executions", `Execution snapshot for run '${runId}' uses an unsupported legacy format.`);
-  invariant(parsed.version === 2, `Execution snapshot for run '${runId}' must use version 2.`);
+  invariant(parsed.version === 3, `Execution snapshot for run '${runId}' must use version 3.`);
   invariant(typeof parsed.runId === "string" && parsed.runId.length > 0, `Execution snapshot for run '${runId}' is missing runId.`);
   invariant(typeof parsed.savedAt === "string", `Execution snapshot for run '${runId}' is missing savedAt.`);
   invariant(Array.isArray(parsed.executions), `Execution snapshot for run '${runId}' must contain an executions array.`);
@@ -140,7 +140,7 @@ async function ensureMeshRunDirectory(runId: string): Promise<string> {
 function buildTraceEnvelope(record: RunRecord): TraceEnvelope {
   return {
     kind: "trademesh-trace",
-    version: 2,
+    version: 3,
     runId: record.id,
     goal: record.goal,
     plane: record.plane,
@@ -157,7 +157,7 @@ function buildTraceEnvelope(record: RunRecord): TraceEnvelope {
 function buildPolicyEnvelope(record: RunRecord): PolicyEnvelope {
   return {
     kind: "trademesh-policy",
-    version: 2,
+    version: 3,
     runId: record.id,
     savedAt: new Date().toISOString(),
     decision: record.policyDecision ?? null,
@@ -167,7 +167,7 @@ function buildPolicyEnvelope(record: RunRecord): PolicyEnvelope {
 function buildExecutionEnvelope(record: RunRecord): ExecutionEnvelope {
   return {
     kind: "trademesh-executions",
-    version: 2,
+    version: 3,
     runId: record.id,
     savedAt: new Date().toISOString(),
     executions: record.executions,
@@ -216,8 +216,8 @@ export async function loadRun(runId: string): Promise<RunRecord> {
     `Run '${runId}' uses an unsupported format. Recreate this run with the current runtime.`,
   );
   invariant(
-    parsed.version === 2,
-    `Run '${runId}' uses version ${String((parsed as { version?: unknown }).version ?? "unknown")}. Hard cutover requires run version 2; recreate the plan.`,
+    parsed.version === 3,
+    `Run '${runId}' uses version ${String((parsed as { version?: unknown }).version ?? "unknown")}. Hard cutover requires run version 3; recreate the plan.`,
   );
   invariant(
     parsed.routeKind === "workflow" || parsed.routeKind === "standalone" || parsed.routeKind === "operations",
@@ -244,7 +244,7 @@ export async function saveArtifactSnapshot(runId: string, snapshot: ArtifactSnap
   const validated = validateArtifactSnapshot(snapshot);
   const envelope: ArtifactSnapshotEnvelope = {
     kind: "trademesh-artifacts",
-    version: 2,
+    version: 3,
     runId,
     savedAt: new Date().toISOString(),
     artifacts: validated,
@@ -267,7 +267,7 @@ export async function loadArtifactSnapshot(runId: string): Promise<ArtifactSnaps
     !Array.isArray(parsed) &&
     "kind" in parsed &&
     parsed.kind === "trademesh-artifacts" &&
-    parsed.version === 2
+    parsed.version === 3
   ) {
     const snapshot = parsed.artifacts && typeof parsed.artifacts === "object" ? parsed.artifacts : {};
     return validateArtifactSnapshot(snapshot);
