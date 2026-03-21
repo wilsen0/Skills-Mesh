@@ -17,6 +17,8 @@ That flagship pack proves the runtime. It is not the whole product identity.
 
 For a single-document Chinese walkthrough of the product, runtime, safety model, user value, and current boundaries, see [PROJECT-INTRODUCTION.zh-CN.md](./PROJECT-INTRODUCTION.zh-CN.md).
 
+For supervised operations procedures (apply/reconcile/live guard/ledger recovery), see [docs/RUNBOOK-M2.5.md](./docs/RUNBOOK-M2.5.md).
+
 ## Why this shape
 
 TradeMesh is optimized for operational clarity and operator trust:
