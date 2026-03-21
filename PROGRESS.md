@@ -6,7 +6,7 @@
 
 - Version: `v0.4.0`
 - Product framing: `CLI Skill Mesh 2.0 for OKX`
-- Status: production-grade supervised execution M2 (`approval + idempotency + reconcile + operator export`)
+- Status: production-grade supervised execution M2.5 (`v3 hard cutover + reliability + supervised-live hardening`)
 
 ## What Is Now Implemented
 
@@ -20,8 +20,12 @@
 - `skills run <name>` now executes manifest-declared standalone mini-workflows
 - `rehearse demo` now runs deterministic operations rehearsal route
 - `runs list` now shows structured run summaries
-- `reconcile <run-id>` now converges pending/ambiguous write outcomes
+- `reconcile <run-id>` now converges pending/ambiguous write outcomes with `--source auto|client-id|fallback` and `--window-min`
 - `export <run-id>` now writes `report.md` + `bundle.json` + `operator-summary.json`
+- `apply` now accepts live supervised flags:
+  - `--live-confirm YES_LIVE_EXECUTION`
+  - `--max-order-usd <n>`
+  - `--max-total-usd <n>`
 
 ### Runtime control model
 
@@ -31,7 +35,9 @@
 - `router` is reduced to goal-signal and seed-selection logic
 - `artifacts` remain the authoritative skill handoff contract
 - `goal.intake` is now the authoritative goal interpretation contract
-- `RunRecord` is now hard-cutover `version: 2` with explicit `routeKind`
+- `RunRecord` is now hard-cutover `version: 3` with explicit `routeKind`
+- artifact envelopes are hard-cutover `version: 3`
+- idempotency storage is now v3 `journal + snapshot + lock`
 
 ### Flagship hedge pack
 
@@ -41,7 +47,8 @@
 - `policy-gate` now surfaces capability gaps and proposal actionability during plan
 - `apply` keeps dry-run first, records structured execution receipts, and does not auto-retry writes
 - `apply --execute` now requires `--approve --approved-by <name>` and emits `approval.ticket`
-- apply write path now checks local idempotency ledger before execution
+- `live` execute now requires supervised guard contract (`live-confirm + order caps + fresh active doctor`)
+- apply write path now checks local idempotency gate before execution
 - write re-execution is skipped on idempotent hit and blocked on pending/ambiguous state
 - `replay` can render the route, evidence, policy verdict, execution receipt, and export pointer
 
@@ -84,10 +91,23 @@
 - `ExecutionRecord.approvalTicketId`
 - `ExecutionRecord.idempotencyChecked`
 - `ExecutionRecord.reconciliationState`
+- `ExecutionRecord.executionId`
+- `ExecutionRecord.idempotencyLedgerSeq`
+- `ExecutionRecord.reconciliationRequired`
+- `ExecutionRecord.doctorCheckedAt`
 - `OkxCommandIntent.clientOrderRef`
+- `ExecutionResult.startedAt`
+- `ExecutionResult.finishedAt`
 - `ApprovalTicket`
-- `IdempotencyLedger`
+- `IdempotencyLedgerV3`
+- `IdempotencyEvent`
 - `ReconciliationReport`
+- `OperatorSummaryV3`
+- `RunRecord.operatorState`
+- `RunRecord.lastSafeAction`
+- `RunRecord.requiresHumanAction`
+- `execution.idempotency-check`
+- `operations.live-guard`
 
 ## Validation
 
@@ -114,10 +134,16 @@ Key verified flows:
 - write idempotent hit skip path
 - reconcile state convergence (`matched/ambiguous/failed`)
 - export operator summary generation
+- v3 ledger concurrency guard (concurrent apply has single write admission)
+- live-guard blocking for missing supervised-live flags
+- reconcile fallback windowed matching
+- replay/export operator summary consistency
+- v3 hard-cutover rejection of v2 run/artifact envelopes
 
 ## What Still Matters Next
 
 ### Next: Batch-3 (M3)
 
-- operator-focused replay/export rendering layers
+- approval lifecycle refinement (expiry/escalation)
+- reconcile-assisted operator workflow for ambiguous settlement
 - second independent mini-workflow pack (`rebalance`)

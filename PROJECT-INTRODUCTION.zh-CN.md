@@ -78,7 +78,8 @@ node dist/bin/trademesh.js plan "hedge my BTC drawdown with demo first" \
   --intent protect-downside \
   --horizon swing
 node dist/bin/trademesh.js apply <run-id> --plane demo --proposal protective-put --approve --approved-by alice --execute
-node dist/bin/trademesh.js reconcile <run-id>
+node dist/bin/trademesh.js apply <run-id> --plane live --proposal protective-put --approve --approved-by alice --live-confirm YES_LIVE_EXECUTION --max-order-usd 500 --max-total-usd 1500 --execute
+node dist/bin/trademesh.js reconcile <run-id> --source auto --window-min 120
 node dist/bin/trademesh.js rehearse demo --approve
 node dist/bin/trademesh.js replay <run-id>
 node dist/bin/trademesh.js export <run-id>
@@ -277,8 +278,16 @@ TradeMesh 采用 artifact handoff。当前关键 artifact 包括：
 M2 阶段新增了三条关键运行时护栏：
 
 - `apply --execute` 必须显式 `--approve --approved-by <name>`，并落 `approval.ticket`
-- 写 intent 在执行前会命中本地幂等 ledger（`.trademesh/ledgers/idempotency.json`）做去重
+- 写 intent 在执行前会命中本地幂等 ledger 做去重
 - 状态不确定时使用 `reconcile <run-id>` 收敛为 `matched / ambiguous / failed`
+
+M2.5 在此基础上进一步收口可靠性：
+
+- 幂等账本升级为 v3 事件账本：  
+  `.trademesh/ledgers/idempotency.v3.snapshot.json` + `.trademesh/ledgers/idempotency.v3.journal.jsonl` + `.trademesh/ledgers/idempotency.v3.lock`
+- `reconcile` 增加 `--source auto|client-id|fallback` 与 `--window-min`，支持可解释的窗口化匹配
+- `live` 执行增加强制门槛：  
+  `--live-confirm YES_LIVE_EXECUTION --max-order-usd --max-total-usd`，并要求 15 分钟内 active doctor 结果
 
 ### 8.5 Standalone Skill Contract
 
