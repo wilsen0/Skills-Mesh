@@ -97,6 +97,12 @@ function defaultRoleForStage(stage: SkillManifest["stage"]): SkillRole {
   return "memory";
 }
 
+function assertManifest(condition: unknown, message: string, path: string): asserts condition {
+  if (!condition) {
+    throw new Error(`Skill manifest error (${path}): ${message}`);
+  }
+}
+
 function normalizeManifest(path: string, fields: Record<string, FrontmatterValue>): SkillManifest {
   const name = typeof fields.name === "string" ? fields.name : "";
   if (!name) {
@@ -107,6 +113,26 @@ function normalizeManifest(path: string, fields: Record<string, FrontmatterValue
     typeof fields.stage === "string"
       ? (fields.stage as SkillManifest["stage"])
       : "sensor";
+  const consumes = parseListValue(fields.consumes) as ArtifactKey[];
+  const produces = parseListValue(fields.produces) as ArtifactKey[];
+  const standaloneRoute = parseListValue(fields.standalone_route);
+  const standaloneInputs = parseListValue(fields.standalone_inputs) as Array<"goal" | "run-id" | ArtifactKey>;
+  const standaloneOutputs = parseListValue(fields.standalone_outputs) as ArtifactKey[];
+
+  assertManifest(standaloneRoute.length > 0, "standalone_route must be non-empty", path);
+  assertManifest(
+    standaloneRoute[standaloneRoute.length - 1] === name,
+    `standalone_route must end with '${name}'`,
+    path,
+  );
+  if (name !== "replay") {
+    const overlap = standaloneOutputs.some((key) => produces.includes(key));
+    assertManifest(
+      overlap,
+      "standalone_outputs must include at least one artifact produced by this skill",
+      path,
+    );
+  }
 
   return {
     name,
@@ -125,8 +151,8 @@ function normalizeManifest(path: string, fields: Record<string, FrontmatterValue
     alwaysOn: Boolean(fields.always_on),
     triggers: parseListValue(fields.triggers),
     entrypoint: typeof fields.entrypoint === "string" ? fields.entrypoint : undefined,
-    consumes: parseListValue(fields.consumes) as ArtifactKey[],
-    produces: parseListValue(fields.produces) as ArtifactKey[],
+    consumes,
+    produces,
     preferredHandoffs: parseListValue(fields.preferred_handoffs),
     repeatable: Boolean(fields.repeatable),
     artifactVersion:
@@ -135,6 +161,14 @@ function normalizeManifest(path: string, fields: Record<string, FrontmatterValue
         : typeof fields.artifact_version === "string"
           ? Number(fields.artifact_version)
           : 1,
+    standaloneCommand:
+      typeof fields.standalone_command === "string"
+        ? fields.standalone_command
+        : `trademesh skills run ${name} "<goal>"`,
+    standaloneRoute,
+    standaloneInputs,
+    standaloneOutputs,
+    requiredCapabilities: parseListValue(fields.required_capabilities) as SkillManifest["requiredCapabilities"],
     path,
   };
 }

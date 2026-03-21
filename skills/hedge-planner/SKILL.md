@@ -14,6 +14,11 @@ produces: [planning.proposals]
 preferred_handoffs: [scenario-sim]
 repeatable: false
 artifact_version: 2
+standalone_command: "trademesh skills run hedge-planner \"<goal>\""
+standalone_route: [portfolio-xray, market-scan, trade-thesis, hedge-planner]
+standalone_inputs: [goal]
+standalone_outputs: [planning.proposals]
+required_capabilities: [okx-cli, market-read, account-read]
 ---
 
 # Hedge Planner

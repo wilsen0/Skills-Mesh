@@ -14,6 +14,11 @@ produces: [policy.plan-decision]
 preferred_handoffs: [official-executor]
 repeatable: false
 artifact_version: 2
+standalone_command: "trademesh skills run policy-gate \"<goal>\""
+standalone_route: [portfolio-xray, market-scan, trade-thesis, hedge-planner, scenario-sim, policy-gate]
+standalone_inputs: [goal]
+standalone_outputs: [planning.proposals, policy.plan-decision]
+required_capabilities: [okx-cli, market-read, account-read]
 ---
 
 # Policy Gate

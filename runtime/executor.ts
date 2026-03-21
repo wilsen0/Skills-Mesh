@@ -3,7 +3,7 @@ import { join, resolve } from "node:path";
 import { executeIntent, inspectOkxEnvironment } from "./okx.js";
 import { createArtifactStore, putArtifact } from "./artifacts.js";
 import { currentArtifactVersion } from "./artifact-schema.js";
-import { runPlanningGraph } from "./graph-runtime.js";
+import { runExplicitRoute, runPlanningGraph } from "./graph-runtime.js";
 import { formatDrawdownPct } from "./goal-intake.js";
 import { buildSkillGraphView, inspectSkillSurface, type SkillGraphView, type SkillRuntimeSurface } from "./mesh.js";
 import { getProjectPaths } from "./paths.js";
@@ -20,9 +20,11 @@ import {
   saveRun,
 } from "./trace.js";
 import type {
+  ArtifactSnapshot,
   ArtifactStore,
   CapabilitySnapshot,
   CommandPreviewEntry,
+  EnvironmentDiagnosis,
   ExecutionErrorCategory,
   ExecutionPlane,
   ExecutionRecord,
@@ -48,6 +50,12 @@ interface PlanOptions {
   goalOverrides?: GoalIntakeOverrides;
 }
 
+interface StandaloneOptions {
+  plane: ExecutionPlane;
+  goalOverrides?: GoalIntakeOverrides;
+  inputArtifacts?: ArtifactSnapshot;
+}
+
 interface ApplyOptions {
   plane?: ExecutionPlane;
   proposalName?: string;
@@ -68,6 +76,11 @@ interface DemoOptions {
 interface ExportOptions {
   format?: "md" | "json";
   outputPath?: string;
+}
+
+interface RehearseOptions {
+  execute?: boolean;
+  approve?: boolean;
 }
 
 interface ExecutionBundle {
@@ -173,38 +186,6 @@ function goalIntakeFromArtifacts(artifacts: ArtifactStore): GoalIntake | undefin
   return artifacts.get<GoalIntake>("goal.intake")?.data;
 }
 
-function inferModuleFromCommand(command: string): string {
-  const tokens = command.trim().split(/\s+/);
-  if (tokens[0] === "okx" && tokens[1]) {
-    return tokens[1];
-  }
-
-  return "unknown";
-}
-
-function inferWriteFromCommand(command: string, module: string): boolean {
-  if (["swap", "option", "spot", "margin", "subaccount"].includes(module)) {
-    return true;
-  }
-
-  return /\b(order|place|create|cancel|close|open)\b/i.test(command);
-}
-
-function toLegacyIntent(command: string): OkxCommandIntent {
-  const module = inferModuleFromCommand(command);
-  const requiresWrite = inferWriteFromCommand(command, module);
-  return {
-    intentId: `${module}:${command}`,
-    stepIndex: 0,
-    safeToRetry: !requiresWrite,
-    command,
-    args: command.trim().split(/\s+/),
-    module,
-    requiresWrite,
-    reason: "Migrated from legacy cliIntents string command.",
-  };
-}
-
 function previewEntryFromIntent(intent: OkxCommandIntent): CommandPreviewEntry {
   return {
     intentId: intent.intentId,
@@ -218,9 +199,7 @@ function previewEntryFromIntent(intent: OkxCommandIntent): CommandPreviewEntry {
 }
 
 function normalizeProposal(proposal: SkillProposal): SkillProposal {
-  const intents = proposal.intents && proposal.intents.length > 0
-    ? proposal.intents
-    : (proposal.cliIntents ?? []).map(toLegacyIntent);
+  const intents = proposal.intents ?? [];
   const requiredModules = proposal.requiredModules && proposal.requiredModules.length > 0
     ? proposal.requiredModules
     : [...new Set(intents.map((intent) => intent.module))];
@@ -418,7 +397,9 @@ function hydrateRecord(record: HydrateInput): RunRecord {
 
   const hydrated: RunRecord = {
     ...record,
+    version: 2,
     status: normalizeStatus(record.status),
+    routeKind: record.routeKind ?? "workflow",
     facts,
     constraints,
     proposals,
@@ -446,11 +427,13 @@ async function loadNormalizedRun(runId: string): Promise<RunRecord> {
 
   return hydrateRecord({
     kind: "trademesh-run",
-    version: 1,
+    version: 2,
     id: loaded.id,
     goal: loaded.goal,
     plane: loaded.plane,
     status: loaded.status,
+    routeKind: loaded.routeKind ?? "workflow",
+    entrySkill: loaded.entrySkill,
     route: loaded.route,
     trace: loaded.trace,
     notes: loaded.notes ?? [],
@@ -767,11 +750,12 @@ export async function createPlan(goal: string, options: PlanOptions): Promise<Ru
 
   const record = hydrateRecord({
     kind: "trademesh-run",
-    version: 1,
+    version: 2,
     id: runId,
     goal,
     plane: options.plane,
     status: initialPlanStatus(policyDecision),
+    routeKind: "workflow",
     route,
     trace: graph.trace,
     selectedProposal,
@@ -789,6 +773,90 @@ export async function createPlan(goal: string, options: PlanOptions): Promise<Ru
       "Use apply --proposal <name> to select an execution path.",
       "Use --approve and --execute for explicit write execution.",
       `Initial plane: ${options.plane}`,
+    ],
+    createdAt: now(),
+    updatedAt: now(),
+  });
+
+  await saveRun(record);
+  await saveArtifactSnapshot(runId, artifacts.snapshot());
+  return record;
+}
+
+function assertStandaloneOutputs(manifest: SkillManifest, artifacts: ArtifactStore): void {
+  if (manifest.name === "replay") {
+    return;
+  }
+
+  const missing = manifest.standaloneOutputs.filter((key) => !artifacts.has(key));
+  if (missing.length > 0) {
+    throw new Error(
+      `Standalone run for '${manifest.name}' did not produce required artifacts: ${missing.join(", ")}.`,
+    );
+  }
+}
+
+export async function runSkillStandalone(
+  skillName: string,
+  goal: string,
+  options: StandaloneOptions,
+): Promise<RunRecord> {
+  const manifests = await loadSkillRegistry();
+  const manifest = manifests.find((entry) => entry.name === skillName);
+  if (!manifest) {
+    throw new Error(`Skill '${skillName}' was not found in the local registry.`);
+  }
+
+  const runId = await createRunId();
+  const capabilitySnapshot = await inspectOkxEnvironment();
+  const sharedState: Record<string, unknown> = {};
+  const artifacts = createArtifactStore(options.inputArtifacts, sharedState);
+  const graph = await runExplicitRoute({
+    route: manifest.standaloneRoute,
+    manifests,
+    executeSkill,
+    context: {
+      runId,
+      goal,
+      plane: options.plane,
+      manifests,
+      trace: [],
+      artifacts,
+      runtimeInput: {
+        capabilitySnapshot,
+        goalOverrides: options.goalOverrides ?? {},
+        replaySourceRunId: skillName === "replay" ? goal : undefined,
+      },
+      sharedState,
+    },
+  });
+  assertStandaloneOutputs(manifest, artifacts);
+
+  const policyDecision = artifacts.get<PolicyDecision>("policy.plan-decision")?.data;
+  const proposals = proposalsFromArtifacts(artifacts);
+  const selectedProposal = preferredProposalName(proposals);
+  const route = [...graph.route];
+  const record = hydrateRecord({
+    kind: "trademesh-run",
+    version: 2,
+    id: runId,
+    goal,
+    plane: options.plane,
+    status: initialPlanStatus(policyDecision),
+    routeKind: "standalone",
+    entrySkill: skillName,
+    route,
+    trace: graph.trace,
+    selectedProposal,
+    policyDecision,
+    capabilitySnapshot,
+    routeSummary: buildRouteSummary(goal, manifests, route),
+    executions: [],
+    errors: [],
+    notes: [
+      `Standalone route executed for skill '${skillName}'.`,
+      `Standalone route: ${route.join(" -> ")}`,
+      `Selected plane: ${options.plane}`,
     ],
     createdAt: now(),
     updatedAt: now(),
@@ -996,6 +1064,154 @@ export async function replayRun(runId: string, options: ReplayOptions = {}): Pro
   await saveRun(nextRecord);
   await saveArtifactSnapshot(runId, artifacts.snapshot());
   return nextRecord;
+}
+
+export async function rehearseDemo(options: RehearseOptions = {}): Promise<RunRecord> {
+  const manifests = await loadSkillRegistry();
+  const runId = await createRunId();
+  const capabilitySnapshot = await inspectOkxEnvironment();
+  if (!capabilitySnapshot.demoProfileLikelyConfigured) {
+    throw new Error("Demo profile is required for rehearsal. Run `trademesh doctor --probe active` first.");
+  }
+
+  const sharedState: Record<string, unknown> = {};
+  const artifacts = createArtifactStore(undefined, sharedState);
+  const route = [
+    "env-probe",
+    "market-probe",
+    "account-probe",
+    "diagnosis-synthesizer",
+    "rehearsal-planner",
+    "policy-gate",
+    "official-executor",
+  ];
+  const graph = await runExplicitRoute({
+    route,
+    manifests,
+    executeSkill,
+    context: {
+      runId,
+      goal: "rehearse demo write path",
+      plane: "demo",
+      manifests,
+      trace: [],
+      artifacts,
+      runtimeInput: {
+        capabilitySnapshot,
+        probeMode: "write",
+        goalOverrides: {
+          symbols: ["BTC"],
+          targetDrawdownPct: 2,
+          hedgeIntent: "protect_downside",
+          timeHorizon: "intraday",
+          executePreference: options.execute ? "execute" : "dry_run",
+        },
+      },
+      sharedState,
+    },
+  });
+
+  const proposal = resolveProposal(artifacts, undefined);
+  const decision = await evaluatePolicy({
+    phase: "apply",
+    artifacts,
+    proposal,
+    plane: "demo",
+    approvalProvided: Boolean(options.approve),
+    executeRequested: Boolean(options.execute),
+    capabilitySnapshot,
+  });
+  putArtifact(artifacts, {
+    key: "policy.plan-decision",
+    version: currentArtifactVersion("policy.plan-decision"),
+    producer: "rehearse-runtime",
+    data: decision,
+    ruleRefs: decision.ruleRefs ?? [],
+    doctrineRefs: decision.doctrineRefs ?? [],
+  });
+  putArtifact(artifacts, {
+    key: "execution.apply-decision",
+    version: currentArtifactVersion("execution.apply-decision"),
+    producer: "rehearse-runtime",
+    data: decision,
+    ruleRefs: decision.ruleRefs ?? [],
+    doctrineRefs: decision.doctrineRefs ?? [],
+  });
+  const bundle = extractExecutionBundle(artifacts, proposal);
+  const blockedReason = decision.outcome === "approved" ? undefined : decision.reasons.join("; ");
+  const executionOutcome =
+    decision.outcome === "approved"
+      ? await executeWithRecovery(bundle.intents, {
+          runId,
+          proposal: proposal.name,
+          executeRequested: Boolean(options.execute),
+        })
+      : {
+          results: bundle.intents.map((intent) =>
+            skippedResult(intent, Boolean(options.execute), blockedReason ?? "blocked"),
+          ),
+          errors: [] as RunErrorRecord[],
+          finalResults: bundle.intents.map((intent) =>
+            skippedResult(intent, Boolean(options.execute), blockedReason ?? "blocked"),
+          ),
+        };
+  const executionOk = executionOutcome.finalResults.every((result) => result.ok);
+  const status = nextStatusFromPolicy(decision.outcome, Boolean(options.execute), executionOk);
+  const execution: ExecutionRecord = {
+    requestedAt: now(),
+    mode: options.execute ? "execute" : "dry-run",
+    plane: "demo",
+    proposal: proposal.name,
+    approvalProvided: Boolean(options.approve),
+    status,
+    results: executionOutcome.results,
+    blockedReason,
+  };
+  putArtifact(artifacts, {
+    key: "operations.rehearsal-receipt",
+    version: currentArtifactVersion("operations.rehearsal-receipt"),
+    producer: "rehearse-runtime",
+    data: {
+      runId,
+      proposal: proposal.name,
+      status,
+      mode: execution.mode,
+      blockedReason: blockedReason ?? null,
+      results: execution.results,
+      decision,
+    },
+    ruleRefs: decision.ruleRefs ?? [],
+    doctrineRefs: decision.doctrineRefs ?? [],
+  });
+
+  const record = hydrateRecord({
+    kind: "trademesh-run",
+    version: 2,
+    id: runId,
+    goal: "rehearse demo write path",
+    plane: "demo",
+    status,
+    routeKind: "operations",
+    route: graph.route,
+    trace: graph.trace,
+    selectedProposal: proposal.name,
+    policyDecision: decision,
+    capabilitySnapshot,
+    routeSummary: buildRouteSummary("rehearse demo write path", manifests, graph.route),
+    executions: [execution],
+    errors: executionOutcome.errors,
+    notes: [
+      "Demo rehearsal route executed.",
+      `Apply verdict: ${decision.outcome}`,
+      `Execute requested: ${options.execute ? "yes" : "no"}`,
+    ],
+    createdAt: now(),
+    updatedAt: now(),
+  });
+
+  await saveRun(record);
+  await saveArtifactSnapshot(runId, artifacts.snapshot());
+  return record;
 }
 
 interface RunListSummary {
@@ -1310,6 +1526,11 @@ export async function inspectSkill(skillName: string): Promise<{ skill: SkillRun
       `Produces: ${skill.produces.length > 0 ? skill.produces.join(", ") : "none"}`,
       `Preferred handoffs: ${skill.preferredHandoffs.length > 0 ? skill.preferredHandoffs.join(", ") : "none"}`,
       `Allowed execution modules: ${skill.allowedExecutionModules.length > 0 ? skill.allowedExecutionModules.join(", ") : "none"}`,
+      `Standalone command: ${skill.standaloneCommand}`,
+      `Standalone route: ${skill.standaloneRoute.length > 0 ? skill.standaloneRoute.join(" -> ") : "none"}`,
+      `Standalone inputs: ${skill.standaloneInputs.length > 0 ? skill.standaloneInputs.join(", ") : "none"}`,
+      `Standalone outputs: ${skill.standaloneOutputs.length > 0 ? skill.standaloneOutputs.join(", ") : "none"}`,
+      `Required capabilities: ${skill.requiredCapabilities.length > 0 ? skill.requiredCapabilities.join(", ") : "none"}`,
     ]),
     block("Routing Signals", [
       `Requires: ${skill.requires.length > 0 ? skill.requires.join(", ") : "none"}`,
@@ -1381,16 +1602,20 @@ function markdownSection(title: string, lines: string[]): string {
 
 function exportBundlePayload(record: RunRecord, artifacts: ArtifactStore): Record<string, unknown> {
   const goalIntake = goalIntakeFromArtifacts(artifacts) ?? traceGoalIntake(record);
+  const diagnosis = artifacts.get<EnvironmentDiagnosis>("diagnostics.readiness")?.data ?? null;
   const latestExecution = record.executions.at(-1) ?? null;
   return {
     runId: record.id,
     goal: record.goal,
     plane: record.plane,
     status: record.status,
+    routeKind: record.routeKind,
+    entrySkill: record.entrySkill ?? null,
     createdAt: record.createdAt,
     updatedAt: record.updatedAt,
     goalIntake,
     capabilitySnapshot: record.capabilitySnapshot,
+    diagnosis,
     routeSummary: record.routeSummary ?? null,
     proposalTable: record.proposals,
     selectedProposal: record.selectedProposal ?? preferredProposalName(record.proposals) ?? null,

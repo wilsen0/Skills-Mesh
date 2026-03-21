@@ -12,6 +12,10 @@ const CURRENT_ARTIFACT_VERSIONS: Record<ArtifactKey, number> = {
   "policy.plan-decision": 2,
   "execution.intent-bundle": 2,
   "execution.apply-decision": 2,
+  "diagnostics.probes": 2,
+  "diagnostics.readiness": 2,
+  "operations.rehearsal-plan": 2,
+  "operations.rehearsal-receipt": 2,
 };
 
 export function currentArtifactVersion(key: ArtifactKey): number {

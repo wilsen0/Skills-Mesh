@@ -209,7 +209,21 @@ export async function loadRun(runId: string): Promise<RunRecord> {
   const { runsRoot } = getProjectPaths();
   const filePath = join(runsRoot, `${runId}.json`);
   const contents = await fs.readFile(filePath, "utf8");
-  return JSON.parse(contents) as RunRecord;
+  const parsed = JSON.parse(contents) as unknown;
+  invariant(isObject(parsed), `Run '${runId}' is malformed.`);
+  invariant(
+    parsed.kind === "trademesh-run",
+    `Run '${runId}' uses an unsupported format. Recreate this run with the current runtime.`,
+  );
+  invariant(
+    parsed.version === 2,
+    `Run '${runId}' uses version ${String((parsed as { version?: unknown }).version ?? "unknown")}. Hard cutover requires run version 2; recreate the plan.`,
+  );
+  invariant(
+    parsed.routeKind === "workflow" || parsed.routeKind === "standalone" || parsed.routeKind === "operations",
+    `Run '${runId}' is missing routeKind. Hard cutover requires new run metadata; recreate the plan.`,
+  );
+  return parsed as unknown as RunRecord;
 }
 
 export async function loadTraceEnvelope(runId: string): Promise<TraceEnvelope | null> {

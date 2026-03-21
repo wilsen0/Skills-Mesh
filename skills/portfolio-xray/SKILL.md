@@ -14,6 +14,11 @@ produces: [goal.intake, portfolio.snapshot, portfolio.risk-profile]
 preferred_handoffs: [market-scan]
 repeatable: false
 artifact_version: 2
+standalone_command: "trademesh skills run portfolio-xray \"<goal>\""
+standalone_route: [portfolio-xray]
+standalone_inputs: [goal]
+standalone_outputs: [goal.intake, portfolio.snapshot, portfolio.risk-profile]
+required_capabilities: [okx-cli, account-read]
 ---
 
 # Portfolio Xray

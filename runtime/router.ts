@@ -52,7 +52,7 @@ export function shouldSeedManifest(goal: string, manifest: SkillManifest): boole
     return true;
   }
 
-  return manifest.consumes.length > 0;
+  return false;
 }
 
 export function buildPlanningRoute(goal: string, manifests: SkillManifest[]): SkillManifest[] {

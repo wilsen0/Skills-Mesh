@@ -20,6 +20,11 @@ export interface SkillRuntimeSurface {
   triggers: string[];
   description: string;
   allowedExecutionModules: string[];
+  standaloneCommand: string;
+  standaloneRoute: string[];
+  standaloneInputs: SkillManifest["standaloneInputs"];
+  standaloneOutputs: SkillManifest["standaloneOutputs"];
+  requiredCapabilities: SkillManifest["requiredCapabilities"];
 }
 
 export interface SkillGraphEdge {
@@ -63,6 +68,11 @@ function toSurface(manifest: SkillManifest): SkillRuntimeSurface {
     triggers: [...manifest.triggers],
     description: manifest.description,
     allowedExecutionModules: inferAllowedExecutionModules(manifest),
+    standaloneCommand: manifest.standaloneCommand,
+    standaloneRoute: [...manifest.standaloneRoute],
+    standaloneInputs: [...manifest.standaloneInputs],
+    standaloneOutputs: [...manifest.standaloneOutputs],
+    requiredCapabilities: [...manifest.requiredCapabilities],
   };
 }
 

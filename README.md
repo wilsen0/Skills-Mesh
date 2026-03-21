@@ -21,10 +21,12 @@ For a single-document Chinese walkthrough of the product, runtime, safety model,
 
 TradeMesh is optimized for operational clarity and operator trust:
 
-- `doctor` shows whether the local mesh is ready to plan, dry-run, or execute on OKX demo
+- `doctor --probe passive|active|write` surfaces module-level readiness with probe receipts
 - `skills inspect` and `skills graph` expose the mesh topology from skill manifests
+- `skills run <name>` executes a manifest-declared standalone mini-workflow per skill
 - `plan` produces ranked proposals, actionability labels, and a policy preview
 - `apply` keeps dry-run first and routes every write through `official-executor`
+- `rehearse demo` validates policy + executor with a deterministic rehearsal route
 - `replay` reconstructs the route, evidence, policy, and execution receipt
 - `export` materializes a run report plus a machine-readable evidence bundle
 
@@ -33,11 +35,13 @@ TradeMesh is optimized for operational clarity and operator trust:
 ```bash
 npm install
 npm run build
-node dist/bin/trademesh.js doctor
+node dist/bin/trademesh.js doctor --probe active --plane demo
 node dist/bin/trademesh.js skills ls
 node dist/bin/trademesh.js skills graph
+node dist/bin/trademesh.js skills run hedge-planner "hedge my BTC drawdown with demo first" --plane demo
 node dist/bin/trademesh.js plan "hedge my BTC drawdown with demo first" --plane demo --symbol BTC --max-drawdown 4 --intent protect-downside --horizon swing
 node dist/bin/trademesh.js apply <run-id> --plane demo --proposal protective-put --approve
+node dist/bin/trademesh.js rehearse demo --approve
 node dist/bin/trademesh.js replay <run-id>
 node dist/bin/trademesh.js export <run-id>
 node dist/bin/trademesh.js demo "hedge my BTC drawdown with demo first" --plane demo
@@ -46,14 +50,16 @@ pnpm test
 
 ## Core Commands
 
-- `trademesh doctor`
+- `trademesh doctor [--probe passive|active|write] [--plane research|demo|live] [--json]`
 - `trademesh demo "<goal>" [--plane research|demo|live] [--execute] [--symbol <CSV>] [--max-drawdown <number>] [--intent protect-downside|reduce-beta|de-risk] [--horizon intraday|swing|position] [--json]`
 - `trademesh skills ls|list`
 - `trademesh skills inspect <name> [--json]`
+- `trademesh skills run <name> "<goal>" [--plane research|demo|live] [--symbol <CSV>] [--max-drawdown <number>] [--intent protect-downside|reduce-beta|de-risk] [--horizon intraday|swing|position] [--input <artifact.json>] [--json]`
 - `trademesh skills graph [--json]`
 - `trademesh runs list`
 - `trademesh plan "<goal>" [--plane research|demo|live] [--profile demo|live] [--symbol <CSV>] [--max-drawdown <number>] [--intent protect-downside|reduce-beta|de-risk] [--horizon intraday|swing|position] [--json]`
 - `trademesh apply <run-id> [--plane demo|live] [--profile demo|live] [--proposal <name>] [--approve] [--execute] [--json]`
+- `trademesh rehearse demo [--execute] [--approve] [--json]`
 - `trademesh replay <run-id> [--skill <name>] [--json]`
 - `trademesh retry <run-id> [--json]`
 - `trademesh export <run-id> [--format md|json] [--output <path>] [--json]`
@@ -83,6 +89,26 @@ This makes planning more deterministic than the earlier prompt-only heuristics.
 - `policy-gate` re-evaluates every ranked proposal, not only the selected one
 - the recommended proposal must come from the proposals that are currently actionable for dry-run or better
 - `doctor` now separates `plan`, `apply`, and `execute` readiness
+
+## Standalone Skill Model
+
+- every skill manifest now declares `standalone_route`, `standalone_inputs`, and `standalone_outputs`
+- `skills run <name>` executes that explicit mini-workflow route without trigger-based auto-routing
+- standalone runs are persisted as normal auditable runs with `routeKind=standalone`
+
+## Active Probe + Rehearsal
+
+- `doctor --probe active` runs read probes for market/account paths and records receipts
+- `doctor --probe write` runs write-path preflight checks without placing orders
+- `rehearse demo` runs a deterministic operations route:
+  - `env-probe -> market-probe -> account-probe -> diagnosis-synthesizer -> rehearsal-planner -> policy-gate -> official-executor`
+- rehearsal writes `operations.rehearsal-plan` and `operations.rehearsal-receipt` artifacts
+
+## Hard Cutover
+
+- run files are now `version: 2` and require `routeKind`
+- legacy run files and legacy raw artifact snapshots are rejected by design
+- recreate old runs with the current runtime before applying/replaying/exporting
 
 ## Demo Script
 

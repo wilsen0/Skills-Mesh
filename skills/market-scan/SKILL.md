@@ -14,6 +14,11 @@ produces: [market.snapshot, market.regime]
 preferred_handoffs: [trade-thesis]
 repeatable: false
 artifact_version: 2
+standalone_command: "trademesh skills run market-scan \"<goal>\""
+standalone_route: [portfolio-xray, market-scan]
+standalone_inputs: [goal]
+standalone_outputs: [market.snapshot, market.regime]
+required_capabilities: [okx-cli, market-read]
 ---
 
 # Market Scan

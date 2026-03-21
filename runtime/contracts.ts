@@ -20,6 +20,10 @@ const ARTIFACT_KEYS: ArtifactKey[] = [
   "policy.plan-decision",
   "execution.intent-bundle",
   "execution.apply-decision",
+  "diagnostics.probes",
+  "diagnostics.readiness",
+  "operations.rehearsal-plan",
+  "operations.rehearsal-receipt",
 ];
 
 const POLICY_OUTCOMES = new Set<PolicyDecision["outcome"]>(["approved", "require_approval", "blocked"]);
@@ -118,6 +122,61 @@ export function validateArtifactData(key: ArtifactKey, data: unknown): void {
     }
     if ("orderPlan" in record) {
       invariant(Array.isArray(record.orderPlan), `Artifact '${key}.orderPlan' must be an array.`);
+    }
+    return;
+  }
+
+  if (key === "diagnostics.probes") {
+    const record = asObject(data);
+    invariant(record, `Artifact '${key}' must be an object.`);
+    if ("probeMode" in record) {
+      invariant(
+        ["passive", "active", "write"].includes(String(record.probeMode)),
+        `Artifact '${key}.probeMode' is invalid.`,
+      );
+    }
+    if ("probeReceipts" in record) {
+      invariant(Array.isArray(record.probeReceipts), `Artifact '${key}.probeReceipts' must be an array.`);
+    }
+    return;
+  }
+
+  if (key === "diagnostics.readiness") {
+    const record = asObject(data);
+    invariant(record, `Artifact '${key}' must be an object.`);
+    if ("modules" in record) {
+      invariant(Array.isArray(record.modules), `Artifact '${key}.modules' must be an array.`);
+    }
+    if ("probeReceipts" in record) {
+      invariant(Array.isArray(record.probeReceipts), `Artifact '${key}.probeReceipts' must be an array.`);
+    }
+    return;
+  }
+
+  if (key === "operations.rehearsal-plan") {
+    const record = asObject(data);
+    invariant(record, `Artifact '${key}' must be an object.`);
+    if ("proposal" in record) {
+      invariant(hasString(record.proposal), `Artifact '${key}.proposal' must be a string.`);
+    }
+    if ("intents" in record) {
+      invariant(Array.isArray(record.intents), `Artifact '${key}.intents' must be an array.`);
+    }
+    return;
+  }
+
+  if (key === "operations.rehearsal-receipt") {
+    const record = asObject(data);
+    invariant(record, `Artifact '${key}' must be an object.`);
+    if ("status" in record) {
+      invariant(
+        ["planned", "approval_required", "ready", "blocked", "dry_run", "executed", "failed", "previewed"]
+          .includes(String(record.status)),
+        `Artifact '${key}.status' is invalid.`,
+      );
+    }
+    if ("results" in record) {
+      invariant(Array.isArray(record.results), `Artifact '${key}.results' must be an array.`);
     }
     return;
   }

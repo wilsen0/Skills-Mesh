@@ -21,6 +21,10 @@ const ARTIFACT_TO_SHARED_STATE: Partial<Record<ArtifactKey, string[]>> = {
   "policy.plan-decision": ["policyPlanDecision"],
   "execution.intent-bundle": ["executionIntentBundle"],
   "execution.apply-decision": ["applyDecision"],
+  "diagnostics.probes": ["diagnosticsProbes"],
+  "diagnostics.readiness": ["diagnosticsReadiness"],
+  "operations.rehearsal-plan": ["rehearsalPlan"],
+  "operations.rehearsal-receipt": ["rehearsalReceipt"],
 };
 
 function cloneArtifact<T>(artifact: SkillArtifact<T>): SkillArtifact<T> {

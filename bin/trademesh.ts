@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 
+import { readFile } from "node:fs/promises";
 import process from "node:process";
 import {
   applyRun,
@@ -12,15 +13,19 @@ import {
   listRuns,
   printSkillList,
   replayRun,
+  rehearseDemo,
   runDemo,
+  runSkillStandalone,
   retryRun,
 } from "../runtime/executor.js";
 import { runDoctor } from "../runtime/doctor.js";
 import type {
+  ArtifactSnapshot,
   ExecutionPlane,
   GoalExecutePreference,
   GoalHedgeIntent,
   GoalIntakeOverrides,
+  ProbeMode,
   GoalTimeHorizon,
 } from "../runtime/types.js";
 
@@ -64,13 +69,15 @@ function parseArgs(args: string[]): ParsedArgs {
 
 function printHelp(): void {
   console.log(`Usage:
-  trademesh doctor
+  trademesh doctor [--probe passive|active|write] [--plane research|demo|live]
   trademesh demo "<goal>" [--plane research|demo|live] [--execute] [--symbol BTC,ETH] [--max-drawdown 4] [--intent protect-downside|reduce-beta|de-risk] [--horizon intraday|swing|position] [--json]
   trademesh skills ls|list
   trademesh skills inspect <name> [--json]
+  trademesh skills run <name> "<goal>" [--plane research|demo|live] [--symbol BTC,ETH] [--max-drawdown 4] [--intent protect-downside|reduce-beta|de-risk] [--horizon intraday|swing|position] [--input <artifact.json>] [--json]
   trademesh skills graph [--json]
   trademesh runs list
   trademesh plan "<goal>" [--plane research|demo|live] [--profile demo|live] [--symbol BTC,ETH] [--max-drawdown 4] [--intent protect-downside|reduce-beta|de-risk] [--horizon intraday|swing|position] [--json]
+  trademesh rehearse demo [--execute] [--approve] [--json]
   trademesh replay <run-id> [--skill <name>] [--json]
   trademesh retry <run-id> [--json]
   trademesh export <run-id> [--format md|json] [--output <path>] [--json]
@@ -118,6 +125,13 @@ function readExplicitApplyPlane(
   }
 
   return undefined;
+}
+
+function readDoctorPlane(planeValue: string | boolean | undefined): ExecutionPlane {
+  if (planeValue === "research" || planeValue === "demo" || planeValue === "live") {
+    return planeValue;
+  }
+  return "demo";
 }
 
 function parseSymbolList(value: string | boolean | undefined): string[] | undefined {
@@ -197,6 +211,34 @@ function goalOverridesFromFlags(
   return Object.keys(overrides).length > 0 ? overrides : undefined;
 }
 
+function readProbeMode(value: string | boolean | undefined): ProbeMode {
+  if (value === "active" || value === "write" || value === "passive") {
+    return value;
+  }
+  return "passive";
+}
+
+async function readInputArtifacts(pathValue: string | boolean | undefined): Promise<ArtifactSnapshot | undefined> {
+  if (typeof pathValue !== "string" || pathValue.trim().length === 0) {
+    return undefined;
+  }
+
+  const raw = await readFile(pathValue, "utf8");
+  const parsed = JSON.parse(raw) as unknown;
+  if (parsed && typeof parsed === "object" && !Array.isArray(parsed) && "artifacts" in parsed) {
+    const envelope = parsed as { artifacts?: unknown };
+    if (envelope.artifacts && typeof envelope.artifacts === "object" && !Array.isArray(envelope.artifacts)) {
+      return envelope.artifacts as ArtifactSnapshot;
+    }
+  }
+
+  if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+    return parsed as ArtifactSnapshot;
+  }
+
+  throw new Error("Standalone --input must be a JSON object or an artifact envelope with an 'artifacts' field.");
+}
+
 async function main(): Promise<void> {
   const args = process.argv.slice(2);
   const command = args[0];
@@ -208,7 +250,11 @@ async function main(): Promise<void> {
   }
 
   if (command === "doctor") {
-    const report = await runDoctor();
+    const parsed = parseArgs(args.slice(1));
+    const report = await runDoctor({
+      probeMode: readProbeMode(parsed.flags.probe),
+      plane: readDoctorPlane(parsed.flags.plane),
+    });
     console.log(jsonMode ? JSON.stringify(report, null, 2) : report.summary);
     return;
   }
@@ -252,6 +298,26 @@ async function main(): Promise<void> {
     return;
   }
 
+  if (command === "skills" && args[1] === "run") {
+    const parsed = parseArgs(args.slice(2));
+    const skillName = parsed.positionals[0];
+    const goal = parsed.positionals.slice(1).join(" ").trim();
+    if (!skillName) {
+      throw new Error("Missing skill name. Example: trademesh skills run hedge-planner \"hedge btc drawdown\"");
+    }
+    if (!goal) {
+      throw new Error("Missing goal. Example: trademesh skills run hedge-planner \"hedge btc drawdown\"");
+    }
+
+    const record = await runSkillStandalone(skillName, goal, {
+      plane: resolvePlanPlane(goal, parsed.flags.plane, parsed.flags.profile),
+      goalOverrides: goalOverridesFromFlags(parsed.flags, parsed.flags.execute === true ? "execute" : "dry_run"),
+      inputArtifacts: await readInputArtifacts(parsed.flags.input),
+    });
+    console.log(jsonMode ? JSON.stringify(record, null, 2) : formatRunSummary(record));
+    return;
+  }
+
   if (command === "skills" && args[1] === "graph") {
     const graph = await describeSkillGraph();
     console.log(jsonMode ? JSON.stringify(graph, null, 2) : graph.summary);
@@ -277,6 +343,16 @@ async function main(): Promise<void> {
       goalOverrides: goalOverridesFromFlags(parsed.flags, "plan_only"),
     });
 
+    console.log(jsonMode ? JSON.stringify(record, null, 2) : formatRunSummary(record));
+    return;
+  }
+
+  if (command === "rehearse" && args[1] === "demo") {
+    const parsed = parseArgs(args.slice(2));
+    const record = await rehearseDemo({
+      execute: parsed.flags.execute === true,
+      approve: parsed.flags.approve === true,
+    });
     console.log(jsonMode ? JSON.stringify(record, null, 2) : formatRunSummary(record));
     return;
   }

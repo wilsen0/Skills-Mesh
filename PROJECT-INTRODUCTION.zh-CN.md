@@ -55,9 +55,12 @@ TradeMesh 更接近以下产品，而不是聊天助手：
 您可以：
 
 - 检查本地环境是否具备 plan / apply / execute 能力
+- 用 `doctor --probe active|write` 做主动探测，而不是只看静态配置
 - 让系统基于您的目标生成对冲方案
 - 用 `--symbol`、`--max-drawdown`、`--intent`、`--horizon` 显式约束目标
 - 查看每个 proposal 的可行动性、环境缺口和 policy 结果
+- 通过 `skills run <name>` 独立调用任意 skill 的 mini-workflow
+- 通过 `rehearse demo` 做标准化演练并生成 rehearsal receipt
 - 在 dry-run 模式下生成结构化命令预览
 - replay 一次 run 的完整链路
 - export 一份可阅读的 `report.md` 和一份可集成的 `bundle.json`
@@ -65,8 +68,9 @@ TradeMesh 更接近以下产品，而不是聊天助手：
 典型命令如下：
 
 ```bash
-node dist/bin/trademesh.js doctor
+node dist/bin/trademesh.js doctor --probe active --plane demo
 node dist/bin/trademesh.js skills graph
+node dist/bin/trademesh.js skills run hedge-planner "hedge my BTC drawdown with demo first" --plane demo
 node dist/bin/trademesh.js plan "hedge my BTC drawdown with demo first" \
   --plane demo \
   --symbol BTC \
@@ -74,6 +78,7 @@ node dist/bin/trademesh.js plan "hedge my BTC drawdown with demo first" \
   --intent protect-downside \
   --horizon swing
 node dist/bin/trademesh.js apply <run-id> --plane demo --proposal protective-put --approve
+node dist/bin/trademesh.js rehearse demo --approve
 node dist/bin/trademesh.js replay <run-id>
 node dist/bin/trademesh.js export <run-id>
 ```
@@ -262,6 +267,23 @@ TradeMesh 采用 artifact handoff。当前关键 artifact 包括：
 
 前者适合阅读和审阅，后者适合归档和系统集成。
 
+### 8.5 Standalone Skill Contract
+
+每个 skill 现在都有显式的 standalone 合同（route/input/output/capabilities）。
+
+这意味着：
+
+- 每个 skill 都可以独立调用
+- 独立调用仍然走 artifact handoff，不走隐式耦合
+- 独立调用结果同样可 replay / export
+
+### 8.6 Active Probe + Rehearsal
+
+系统现在新增了两条运行时能力：
+
+- `doctor --probe passive|active|write`：输出模块级健康状态和 probe receipts
+- `rehearse demo`：走固定演练路线并生成 `operations.rehearsal-plan` / `operations.rehearsal-receipt`
+
 ## 9. 它现在是不是已经可以用
 
 可以用，但要准确理解“可用”的含义。
@@ -290,8 +312,8 @@ TradeMesh 采用 artifact handoff。当前关键 artifact 包括：
 
 现状：
 
-- 当前系统已经具备 `demo` plane、policy、preview 和执行骨架
-- 但“在真实本地 OKX demo 环境里长期稳定执行”还没有被做成日常能力
+- 已经有 `doctor --probe` 和 `rehearse demo`，可以做标准化演练
+- 但“长期稳定、跨环境一致”的 demo execute 日常化能力仍在建设中
 
 能不能解决：
 
@@ -299,14 +321,13 @@ TradeMesh 采用 artifact handoff。当前关键 artifact 包括：
 
 解决方案：
 
-1. 在 `doctor` 中加入主动探测，而不只是被动检查配置文件是否存在。
-2. 增加 `doctor --probe` 或等价的 runtime probe，实际调用只读 `okx` 命令验证账号、profile、市场、账户四类最小能力。
-3. 增加一条标准化 demo rehearsal 流程，固定检查：
+1. 继续强化 `doctor --probe` 的错误分类和可恢复建议。
+2. 把 `rehearse demo` 固化为团队 runbook，固定检查：
    - CLI 是否可调用
    - demo profile 是否可读
    - market/account 只读命令是否成功
    - demo 下单后的 receipt 是否可回读
-4. 为真实 demo execute 增加单独的 runbook 和 failure taxonomy。
+3. 为真实 demo execute 增加单独 failure taxonomy 与恢复脚本。
 
 优先级：
 
@@ -316,8 +337,8 @@ TradeMesh 采用 artifact handoff。当前关键 artifact 包括：
 
 现状：
 
-- 当前 `doctor` 能判断 plan / apply / execute readiness
-- 但对“为什么不能执行”“缺的是配置、权限、网络还是返回格式”还不够深入
+- 当前 `doctor` 已支持模块级诊断（CLI、config、profiles、market-read、account-read、write-path）
+- 但失败归因仍有继续细化空间（例如网络异常类别、接口格式异常类别）
 
 能不能解决：
 
@@ -325,13 +346,8 @@ TradeMesh 采用 artifact handoff。当前关键 artifact 包括：
 
 解决方案：
 
-1. 把 readiness 从单一结论升级为模块级诊断：
-   - CLI
-   - profiles
-   - market read
-   - account read
-   - write path
-2. 每个诊断项都给出：
+1. 每个诊断项继续细化失败分类（配置问题 / 权限问题 / 网络问题 / 响应格式问题）。
+2. 每个诊断项持续保持：
    - 当前状态
    - 失败原因
    - 建议动作

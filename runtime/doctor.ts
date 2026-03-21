@@ -1,8 +1,16 @@
 import process from "node:process";
-import { inspectOkxEnvironment } from "./okx.js";
+import { inspectOkxEnvironment, runOkxProbe } from "./okx.js";
 import { getProjectPaths } from "./paths.js";
 import { loadSkillRegistry } from "./registry.js";
-import type { CapabilitySnapshot } from "./types.js";
+import type {
+  CapabilitySnapshot,
+  EnvironmentDiagnosis,
+  ExecutionPlane,
+  ProbeMode,
+  ProbeModuleName,
+  ProbeModuleStatus,
+  ProbeReceipt,
+} from "./types.js";
 
 type ExecutionReadiness =
   | "can_plan_only"
@@ -20,6 +28,11 @@ const PLANNING_PACK = [
 ];
 const APPLY_PACK = [...PLANNING_PACK, "official-executor", "replay"];
 
+export interface RunDoctorOptions {
+  probeMode?: ProbeMode;
+  plane?: ExecutionPlane;
+}
+
 export interface DoctorReport {
   ok: boolean;
   summary: string;
@@ -33,6 +46,10 @@ export interface DoctorReport {
   executionReadiness: ExecutionReadiness;
   missingSkills: string[];
   recommendations: string[];
+  probeMode: ProbeMode;
+  modules: ProbeModuleStatus[];
+  probeReceipts: ProbeReceipt[];
+  diagnosis: EnvironmentDiagnosis;
 }
 
 function section(title: string, lines: string[]): string {
@@ -123,17 +140,246 @@ function phaseReadiness(
   };
 }
 
-export async function runDoctor(): Promise<DoctorReport> {
+function moduleStatus(
+  module: ProbeModuleName,
+  status: ProbeModuleStatus["status"],
+  reason: string,
+  evidence: string[],
+  nextAction: string,
+): ProbeModuleStatus {
+  return {
+    module,
+    status,
+    reason,
+    evidence,
+    nextAction,
+  };
+}
+
+function profileStatus(snapshot: CapabilitySnapshot, plane: ExecutionPlane): ProbeModuleStatus {
+  if (!snapshot.configExists) {
+    return moduleStatus(
+      "profiles",
+      "blocked",
+      "No executable config/profiles were found.",
+      [`Config path: ${snapshot.configPath}`],
+      "Create ~/.okx/config.toml or local profiles and rerun doctor.",
+    );
+  }
+
+  if (plane === "demo" && !snapshot.demoProfileLikelyConfigured) {
+    return moduleStatus(
+      "profiles",
+      "degraded",
+      "Demo profile markers were not detected.",
+      ["Demo profile: missing"],
+      "Configure a demo profile before execute on demo plane.",
+    );
+  }
+
+  if (plane === "live" && !snapshot.liveProfileLikelyConfigured) {
+    return moduleStatus(
+      "profiles",
+      "degraded",
+      "Live profile markers were not detected.",
+      ["Live profile: missing"],
+      "Configure a live profile before execute on live plane.",
+    );
+  }
+
+  return moduleStatus(
+    "profiles",
+    "ready",
+    "Profiles look usable for the selected plane.",
+    [`Plane=${plane}`],
+    "No action required.",
+  );
+}
+
+function probeResultToStatus(
+  module: ProbeModuleName,
+  receipt: ProbeReceipt | undefined,
+  passiveReason: string,
+  passiveAction: string,
+): ProbeModuleStatus {
+  if (!receipt) {
+    return moduleStatus(module, "degraded", passiveReason, [], passiveAction);
+  }
+
+  if (receipt.ok) {
+    return moduleStatus(
+      module,
+      "ready",
+      "Probe command succeeded.",
+      [`${receipt.command} (${receipt.durationMs}ms)`],
+      "No action required.",
+    );
+  }
+
+  return moduleStatus(
+    module,
+    "blocked",
+    receipt.message ?? "Probe command failed.",
+    [`${receipt.command} (${receipt.durationMs}ms)`],
+    "Resolve command failure and rerun doctor --probe active.",
+  );
+}
+
+function writePathStatus(
+  probeMode: ProbeMode,
+  plane: ExecutionPlane,
+  snapshot: CapabilitySnapshot,
+  skillNames: string[],
+): ProbeModuleStatus {
+  const installed = new Set(skillNames);
+  const missingApply = APPLY_PACK.filter((name) => !installed.has(name));
+
+  if (missingApply.length > 0) {
+    return moduleStatus(
+      "write-path",
+      "blocked",
+      "Required apply path skills are missing.",
+      [`Missing: ${missingApply.join(", ")}`],
+      "Install missing skills before apply/execute.",
+    );
+  }
+
+  if (plane === "research") {
+    return moduleStatus(
+      "write-path",
+      "blocked",
+      "Research plane blocks write intents by policy.",
+      ["Plane=research"],
+      "Switch to demo plane for rehearsals.",
+    );
+  }
+
+  if (plane === "demo" && !snapshot.demoProfileLikelyConfigured) {
+    return moduleStatus(
+      "write-path",
+      "degraded",
+      "Demo profile is not ready for write rehearsals.",
+      ["Demo profile: missing"],
+      "Configure demo profile and rerun doctor.",
+    );
+  }
+
+  if (probeMode === "write") {
+    return moduleStatus(
+      "write-path",
+      "ready",
+      "Write-path preflight passed (no write command executed).",
+      ["Use `trademesh rehearse demo --execute` for controlled execution rehearsal."],
+      "No action required.",
+    );
+  }
+
+  return moduleStatus(
+    "write-path",
+    "degraded",
+    "Write-path probe is available but not executed in this mode.",
+    [`probeMode=${probeMode}`],
+    "Use --probe write or rehearse demo to validate write path.",
+  );
+}
+
+function moduleLines(modules: ProbeModuleStatus[]): string[] {
+  return modules.map((entry) => `${entry.module}: ${entry.status} | ${entry.reason}`);
+}
+
+function receiptLines(receipts: ProbeReceipt[]): string[] {
+  if (receipts.length === 0) {
+    return ["No probe commands executed."];
+  }
+
+  return receipts.map((receipt) =>
+    `${receipt.module}: ${receipt.ok ? "ok" : "fail"} | ${receipt.command} | ${receipt.durationMs}ms`,
+  );
+}
+
+async function runProbeReceipts(mode: ProbeMode, plane: ExecutionPlane): Promise<ProbeReceipt[]> {
+  if (mode === "passive") {
+    return [];
+  }
+
+  const receipts: ProbeReceipt[] = [];
+  receipts.push(runOkxProbe("market-read", ["market", "ticker", "BTC-USDT"], plane));
+  receipts.push(runOkxProbe("account-read", ["account", "balance"], plane));
+  if (mode === "write") {
+    receipts.push(runOkxProbe("write-path", ["account", "positions"], plane));
+  }
+
+  return receipts;
+}
+
+export async function runDoctor(options: RunDoctorOptions = {}): Promise<DoctorReport> {
+  const probeMode: ProbeMode = options.probeMode ?? "passive";
+  const plane: ExecutionPlane = options.plane ?? "demo";
   const paths = getProjectPaths();
   const [skills, capabilitySnapshot] = await Promise.all([loadSkillRegistry(), inspectOkxEnvironment()]);
-  const readiness = computeExecutionReadiness(
-    skills.map((skill) => skill.name),
-    capabilitySnapshot,
-  );
-  const phaseState = phaseReadiness(
-    skills.map((skill) => skill.name),
-    capabilitySnapshot,
-  );
+  const skillNames = skills.map((skill) => skill.name);
+  const readiness = computeExecutionReadiness(skillNames, capabilitySnapshot);
+  const phaseState = phaseReadiness(skillNames, capabilitySnapshot);
+  const probeReceipts = await runProbeReceipts(probeMode, plane);
+  const marketReceipt = probeReceipts.find((entry) => entry.module === "market-read");
+  const accountReceipt = probeReceipts.find((entry) => entry.module === "account-read");
+  const modules: ProbeModuleStatus[] = [
+    moduleStatus(
+      "runtime",
+      "ready",
+      "Runtime core is reachable.",
+      [`Project root: ${paths.projectRoot}`, `Node: ${process.version}`],
+      "No action required.",
+    ),
+    moduleStatus(
+      "skills",
+      readiness.missingSkills.length > 0 ? "degraded" : "ready",
+      readiness.missingSkills.length > 0
+        ? "Some flagship skills are missing."
+        : "Flagship skills are installed.",
+      readiness.missingSkills.length > 0 ? [`Missing: ${readiness.missingSkills.join(", ")}`] : ["All required skills installed."],
+      readiness.missingSkills.length > 0
+        ? "Install missing skills and rerun doctor."
+        : "No action required.",
+    ),
+    moduleStatus(
+      "okx-cli",
+      capabilitySnapshot.okxCliAvailable ? "ready" : "blocked",
+      capabilitySnapshot.okxCliAvailable ? "okx CLI detected." : "okx CLI missing on PATH.",
+      capabilitySnapshot.okxCliAvailable ? [`Path: ${capabilitySnapshot.okxCliPath ?? "unknown"}`] : ["PATH lookup failed."],
+      capabilitySnapshot.okxCliAvailable ? "No action required." : "Install okx CLI and ensure it is on PATH.",
+    ),
+    moduleStatus(
+      "config",
+      capabilitySnapshot.configExists ? "ready" : "blocked",
+      capabilitySnapshot.configExists ? "Config path is present." : "Config/profiles path missing.",
+      [`Config path: ${capabilitySnapshot.configPath}`],
+      capabilitySnapshot.configExists
+        ? "No action required."
+        : "Create ~/.okx/config.toml or profiles/ before executing.",
+    ),
+    profileStatus(capabilitySnapshot, plane),
+    probeResultToStatus(
+      "market-read",
+      marketReceipt,
+      "Market probe skipped in passive mode.",
+      "Use --probe active to run market read probes.",
+    ),
+    probeResultToStatus(
+      "account-read",
+      accountReceipt,
+      "Account probe skipped in passive mode.",
+      "Use --probe active to run account read probes.",
+    ),
+    writePathStatus(probeMode, plane, capabilitySnapshot, skillNames),
+  ];
+  const diagnosis: EnvironmentDiagnosis = {
+    probeMode,
+    plane,
+    modules,
+    probeReceipts,
+  };
+
   const recommendations = [
     ...(readiness.missingSkills.length > 0
       ? [`Install the missing flagship skills: ${readiness.missingSkills.join(", ")}.`]
@@ -143,8 +389,10 @@ export async function runDoctor(): Promise<DoctorReport> {
     ...(!capabilitySnapshot.demoProfileLikelyConfigured
       ? ["Configure a demo profile before attempting `--execute` on the demo plane."]
       : []),
+    probeMode === "passive"
+      ? "Run `trademesh doctor --probe active` for runtime read-path validation."
+      : "Use `trademesh rehearse demo` to validate policy + executor with deterministic rehearsal flow.",
     "Prefer apply without --execute first to validate policy and execution intents.",
-    "Use replay after apply to show the auditable route, policy verdict, and execution receipt.",
   ];
   const ok = readiness.readiness !== "cannot_execute";
 
@@ -154,6 +402,8 @@ export async function runDoctor(): Promise<DoctorReport> {
     `Node: ${process.version}`,
     "",
     section("Runtime Readiness", [
+      `Probe mode: ${probeMode}`,
+      `Probe plane: ${plane}`,
       `Overall grade: ${capabilitySnapshot.readinessGrade}`,
       `Plan readiness: ${phaseState.planReadiness}`,
       `Apply readiness: ${phaseState.applyReadiness}`,
@@ -163,13 +413,8 @@ export async function runDoctor(): Promise<DoctorReport> {
       `Skills installed: ${skills.length}`,
       `Missing flagship skills: ${readiness.missingSkills.length > 0 ? readiness.missingSkills.join(", ") : "none"}`,
     ]),
-    section("OKX Environment", [
-      `OKX CLI status: ${capabilitySnapshot.okxCliAvailable ? "detected" : "missing"}`,
-      `Config path: ${capabilitySnapshot.configPath}`,
-      `Config status: ${capabilitySnapshot.configExists ? "available" : "missing"}`,
-      `Demo profile: ${capabilitySnapshot.demoProfileLikelyConfigured ? "ready" : "not ready"}`,
-      `Live profile: ${capabilitySnapshot.liveProfileLikelyConfigured ? "ready" : "not ready"}`,
-    ]),
+    section("Health Modules", moduleLines(modules)),
+    section("Probe Receipts", receiptLines(probeReceipts)),
     section("Blockers And Remedies", [
       ...(capabilitySnapshot.blockers.length > 0
         ? capabilitySnapshot.blockers.map((blocker) => `blocker: ${blocker}`)
@@ -177,7 +422,7 @@ export async function runDoctor(): Promise<DoctorReport> {
       ...(capabilitySnapshot.warnings.length > 0
         ? capabilitySnapshot.warnings.map((warning) => `warning: ${warning}`)
         : ["warning: none"]),
-      ...recommendations.slice(0, 3).map((item) => `remedy: ${item}`),
+      ...recommendations.slice(0, 4).map((item) => `remedy: ${item}`),
     ]),
   ].join("\n");
 
@@ -194,5 +439,9 @@ export async function runDoctor(): Promise<DoctorReport> {
     executionReadiness: readiness.readiness,
     missingSkills: readiness.missingSkills,
     recommendations,
+    probeMode,
+    modules,
+    probeReceipts,
+    diagnosis,
   };
 }

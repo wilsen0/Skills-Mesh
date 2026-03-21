@@ -85,6 +85,13 @@ export interface PlanningGraphResult {
   route: string[];
 }
 
+export interface ExplicitRouteOptions {
+  route: string[];
+  manifests: SkillManifest[];
+  executeSkill: (manifest: SkillManifest, context: Omit<SkillContext, "manifest">) => Promise<SkillOutput>;
+  context: Omit<SkillContext, "manifest">;
+}
+
 export async function runPlanningGraph(options: PlanningGraphOptions): Promise<PlanningGraphResult> {
   const candidates = options.manifests
     .filter(isPlanningManifest)
@@ -131,6 +138,42 @@ export async function runPlanningGraph(options: PlanningGraphOptions): Promise<P
       })
       .join("; ");
     throw new Error(`Planning graph could not satisfy skill dependencies: ${missing}`);
+  }
+
+  return { trace, route };
+}
+
+export async function runExplicitRoute(options: ExplicitRouteOptions): Promise<PlanningGraphResult> {
+  const byName = new Map(options.manifests.map((manifest) => [manifest.name, manifest]));
+  const trace: SkillOutput[] = [];
+  const route: string[] = [];
+  const executedCounts = new Map<string, number>();
+
+  for (const skillName of options.route) {
+    const manifest = byName.get(skillName);
+    if (!manifest) {
+      throw new Error(`Explicit route references unknown skill '${skillName}'.`);
+    }
+
+    const executed = executedCounts.get(manifest.name) ?? 0;
+    if (executed > 0 && !manifest.repeatable) {
+      continue;
+    }
+
+    if (!dependenciesSatisfied(manifest, options.context.artifacts)) {
+      const missing = manifest.consumes.filter((key) => !options.context.artifacts.has(key));
+      throw new Error(
+        `Explicit route cannot execute '${manifest.name}': missing artifacts [${missing.join(", ")}].`,
+      );
+    }
+
+    const output = await options.executeSkill(manifest, {
+      ...options.context,
+      trace,
+    });
+    trace.push(output);
+    route.push(manifest.name);
+    executedCounts.set(manifest.name, executed + 1);
   }
 
   return { trace, route };

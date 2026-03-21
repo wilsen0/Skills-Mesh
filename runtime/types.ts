@@ -23,7 +23,11 @@ export type ArtifactKey =
   | "planning.scenario-matrix"
   | "policy.plan-decision"
   | "execution.intent-bundle"
-  | "execution.apply-decision";
+  | "execution.apply-decision"
+  | "diagnostics.probes"
+  | "diagnostics.readiness"
+  | "operations.rehearsal-plan"
+  | "operations.rehearsal-receipt";
 export type RunStatus =
   | "planned"
   | "approval_required"
@@ -42,11 +46,57 @@ export type ProposalExecutionReadiness =
   | "ready_for_demo_execute"
   | "env_missing"
   | "policy_blocked";
+export type CapabilityRequirement =
+  | "okx-cli"
+  | "config"
+  | "demo-profile"
+  | "live-profile"
+  | "market-read"
+  | "account-read"
+  | "swap-write"
+  | "option-write";
+export type ProbeMode = "passive" | "active" | "write";
+export type ProbeModuleName =
+  | "runtime"
+  | "skills"
+  | "okx-cli"
+  | "config"
+  | "profiles"
+  | "market-read"
+  | "account-read"
+  | "write-path";
+export type ProbeModuleLevel = "ready" | "degraded" | "blocked";
 
 export interface ArtifactReference {
   key: ArtifactKey;
   producer?: string;
   version?: number;
+}
+
+export interface ProbeReceipt {
+  module: ProbeModuleName;
+  command: string;
+  ok: boolean;
+  exitCode: number | null;
+  durationMs: number;
+  stdout: string;
+  stderr: string;
+  message?: string;
+}
+
+export interface ProbeModuleStatus {
+  module: ProbeModuleName;
+  status: ProbeModuleLevel;
+  reason: string;
+  evidence: string[];
+  nextAction: string;
+}
+
+export interface EnvironmentDiagnosis {
+  probeMode: ProbeMode;
+  plane: ExecutionPlane;
+  modules: ProbeModuleStatus[];
+  probeReceipts: ProbeReceipt[];
 }
 
 export interface GoalIntake {
@@ -153,6 +203,11 @@ export interface SkillManifest {
   preferredHandoffs: string[];
   repeatable: boolean;
   artifactVersion: number;
+  standaloneCommand: string;
+  standaloneRoute: string[];
+  standaloneInputs: Array<"goal" | "run-id" | ArtifactKey>;
+  standaloneOutputs: ArtifactKey[];
+  requiredCapabilities: CapabilityRequirement[];
 }
 
 export interface SkillProposal {
@@ -496,11 +551,13 @@ export interface JudgeSummary {
 
 export interface RunRecord {
   kind: "trademesh-run";
-  version: 1;
+  version: 2;
   id: string;
   goal: string;
   plane: ExecutionPlane;
   status: RunStatus;
+  routeKind: "workflow" | "standalone" | "operations";
+  entrySkill?: string;
   route: string[];
   trace: SkillOutput[];
   facts: string[];

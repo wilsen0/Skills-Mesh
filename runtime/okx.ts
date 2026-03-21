@@ -9,6 +9,8 @@ import type {
   ExecutionPlane,
   ExecutionResult,
   OkxCommandIntent,
+  ProbeModuleName,
+  ProbeReceipt,
 } from "./types.js";
 
 export interface OkxJsonResult<T> {
@@ -481,5 +483,107 @@ export function executeIntent(intent: OkxCommandIntent, execute: boolean): Execu
     skipped: false,
     dryRun: false,
     durationMs,
+  };
+}
+
+export function runOkxProbe(
+  module: ProbeModuleName,
+  args: string[],
+  plane: ExecutionPlane,
+  timeoutMs = 8_000,
+): ProbeReceipt {
+  const command = buildOkxCommand(args, plane);
+  const startedAt = Date.now();
+
+  if (!lookupOkxPath()) {
+    return {
+      module,
+      command,
+      ok: false,
+      exitCode: null,
+      durationMs: Date.now() - startedAt,
+      stdout: "",
+      stderr: "okx CLI is not installed on PATH.",
+      message: "okx CLI is not installed on PATH.",
+    };
+  }
+
+  const result = spawnSync("okx", [...args, ...buildPlaneFlags(plane)], {
+    encoding: "utf8",
+    timeout: timeoutMs,
+  });
+  const durationMs = Date.now() - startedAt;
+  const stdout = result.stdout ?? "";
+  const stderr = result.stderr ?? "";
+
+  if (result.error) {
+    return {
+      module,
+      command,
+      ok: false,
+      exitCode: result.status,
+      durationMs,
+      stdout,
+      stderr: stderr || result.error.message,
+      message: result.error.message,
+    };
+  }
+
+  if (result.status !== 0) {
+    return {
+      module,
+      command,
+      ok: false,
+      exitCode: result.status,
+      durationMs,
+      stdout,
+      stderr,
+      message: stderr.trim() || "okx CLI returned a non-zero exit status.",
+    };
+  }
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(stdout);
+  } catch {
+    return {
+      module,
+      command,
+      ok: false,
+      exitCode: result.status,
+      durationMs,
+      stdout,
+      stderr,
+      message: "okx CLI returned non-JSON output.",
+    };
+  }
+
+  if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+    const payload = parsed as Record<string, unknown>;
+    if ("code" in payload) {
+      const responseCode = String(payload.code ?? "");
+      if (responseCode !== "" && responseCode !== "0") {
+        return {
+          module,
+          command,
+          ok: false,
+          exitCode: result.status,
+          durationMs,
+          stdout,
+          stderr,
+          message: summarizeOkxErrorPayload(payload),
+        };
+      }
+    }
+  }
+
+  return {
+    module,
+    command,
+    ok: true,
+    exitCode: result.status,
+    durationMs,
+    stdout,
+    stderr,
   };
 }

@@ -14,6 +14,10 @@ test("registry parses extended skill contract frontmatter", async () => {
   assert.deepEqual(thesis.consumes, ["portfolio.snapshot", "portfolio.risk-profile", "market.regime"]);
   assert.deepEqual(thesis.produces, ["trade.thesis"]);
   assert.deepEqual(thesis.preferredHandoffs, ["hedge-planner"]);
+  assert.equal(thesis.standaloneCommand.includes("skills run trade-thesis"), true);
+  assert.deepEqual(thesis.standaloneRoute, ["portfolio-xray", "market-scan", "trade-thesis"]);
+  assert.deepEqual(thesis.standaloneInputs, ["goal"]);
+  assert.deepEqual(thesis.standaloneOutputs, ["trade.thesis"]);
 });
 
 test("graph runtime honors artifact dependencies and preferred handoffs", async () => {
@@ -36,6 +40,11 @@ test("graph runtime honors artifact dependencies and preferred handoffs", async 
       preferredHandoffs: ["planner-a"],
       repeatable: false,
       artifactVersion: 2,
+      standaloneCommand: "trademesh skills run sensor-a \"<goal>\"",
+      standaloneRoute: ["sensor-a"],
+      standaloneInputs: ["goal"],
+      standaloneOutputs: ["portfolio.snapshot"],
+      requiredCapabilities: [],
       path: "sensor-a",
     },
     {
@@ -46,13 +55,18 @@ test("graph runtime honors artifact dependencies and preferred handoffs", async 
       requires: [],
       riskLevel: "low",
       writes: false,
-      alwaysOn: false,
+      alwaysOn: true,
       triggers: [],
       consumes: ["portfolio.snapshot"],
       produces: ["trade.thesis"],
       preferredHandoffs: ["guardrail-a"],
       repeatable: false,
       artifactVersion: 2,
+      standaloneCommand: "trademesh skills run planner-a \"<goal>\"",
+      standaloneRoute: ["sensor-a", "planner-a"],
+      standaloneInputs: ["goal"],
+      standaloneOutputs: ["trade.thesis"],
+      requiredCapabilities: [],
       path: "planner-a",
     },
     {
@@ -70,6 +84,11 @@ test("graph runtime honors artifact dependencies and preferred handoffs", async 
       preferredHandoffs: [],
       repeatable: false,
       artifactVersion: 2,
+      standaloneCommand: "trademesh skills run guardrail-a \"<goal>\"",
+      standaloneRoute: ["sensor-a", "planner-a", "guardrail-a"],
+      standaloneInputs: ["goal"],
+      standaloneOutputs: ["policy.plan-decision"],
+      requiredCapabilities: [],
       path: "guardrail-a",
     },
   ];

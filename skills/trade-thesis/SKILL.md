@@ -14,6 +14,11 @@ produces: [trade.thesis]
 preferred_handoffs: [hedge-planner]
 repeatable: false
 artifact_version: 2
+standalone_command: "trademesh skills run trade-thesis \"<goal>\""
+standalone_route: [portfolio-xray, market-scan, trade-thesis]
+standalone_inputs: [goal]
+standalone_outputs: [trade.thesis]
+required_capabilities: [okx-cli, market-read, account-read]
 ---
 
 # Trade Thesis

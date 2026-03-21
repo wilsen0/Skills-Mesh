@@ -124,10 +124,14 @@ function summarizePolicy(decision: PolicyDecision | undefined): string {
 export default async function run(context: SkillContext): Promise<SkillOutput> {
   const runtimeInput = context.runtimeInput as Record<string, unknown>;
   const skillFilter = readSkillFilter(runtimeInput);
-  const traceEnvelope = await loadTraceEnvelope(context.runId);
-  const policyEnvelope = await loadPolicyEnvelope(context.runId);
-  const executionEnvelope = await loadExecutionEnvelope(context.runId);
-  const artifactSnapshot = await loadArtifactSnapshot(context.runId);
+  const replaySourceRunId =
+    typeof runtimeInput.replaySourceRunId === "string" && runtimeInput.replaySourceRunId.trim().length > 0
+      ? runtimeInput.replaySourceRunId.trim()
+      : context.runId;
+  const traceEnvelope = await loadTraceEnvelope(replaySourceRunId);
+  const policyEnvelope = await loadPolicyEnvelope(replaySourceRunId);
+  const executionEnvelope = await loadExecutionEnvelope(replaySourceRunId);
+  const artifactSnapshot = await loadArtifactSnapshot(replaySourceRunId);
   const baseTrace = stableTrace(traceEnvelope?.trace ?? context.trace);
   const filteredTrace = skillFilter
     ? baseTrace.filter((entry) => entry.skill.toLowerCase() === skillFilter)
@@ -144,6 +148,7 @@ export default async function run(context: SkillContext): Promise<SkillOutput> {
 
   const facts = [
     `Replay entries: ${replayTrace.length}${skillFilter ? ` (skill filter: ${skillFilter})` : ""}.`,
+    `Source run: ${replaySourceRunId}.`,
     `Artifacts captured: ${artifactLines.length}.`,
     summarizePolicy(latestDecision),
     `Executions recorded: ${latestResults.length}.`,
@@ -160,10 +165,11 @@ export default async function run(context: SkillContext): Promise<SkillOutput> {
     summary: "Replay the run as an evidence graph so every proposal, policy decision, and execution preview is auditable.",
     facts,
     constraints: {
-      traceSource: `.trademesh/runs/${context.runId}/trace.json`,
-      artifactSource: `.trademesh/runs/${context.runId}/artifacts.json`,
+      traceSource: `.trademesh/runs/${replaySourceRunId}/trace.json`,
+      artifactSource: `.trademesh/runs/${replaySourceRunId}/artifacts.json`,
       timelineLength: replayTrace.length,
       skillFilter: skillFilter ?? null,
+      replaySourceRunId,
     },
     proposal: [],
     risk: {

@@ -158,14 +158,15 @@ test("applyRun rejects runs without artifacts.json in current development mode",
   await writeFile(
     runFile,
     JSON.stringify(
-      {
-        kind: "trademesh-run",
-        version: 1,
-        id: runId,
-        goal: "legacy run hedge",
-        plane: "demo",
-        status: "ready",
-        route: ["portfolio-xray", "market-scan", "hedge-planner", "policy-gate", "official-executor"],
+        {
+          kind: "trademesh-run",
+          version: 2,
+          id: runId,
+          goal: "legacy run hedge",
+          plane: "demo",
+          status: "ready",
+          routeKind: "workflow",
+          route: ["portfolio-xray", "market-scan", "hedge-planner", "policy-gate", "official-executor"],
         trace: [
           {
             skill: "portfolio-xray",
@@ -377,11 +378,12 @@ test("saveRun writes current trace/policy/execution envelopes", async () => {
 
   const record = {
     kind: "trademesh-run",
-    version: 1,
+    version: 2,
     id: runId,
     goal: "validate persistence envelopes",
     plane: "demo",
     status: "ready",
+    routeKind: "workflow",
     route: ["portfolio-xray", "replay"],
     trace: [
       {

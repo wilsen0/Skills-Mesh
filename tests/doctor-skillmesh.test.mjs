@@ -81,7 +81,7 @@ test("doctor reports okx-only readiness when CLI exists but no executable config
         assert.equal(report.capabilitySnapshot.readinessGrade, "C");
         assert.equal(report.capabilitySnapshot.configExists, false);
         assert.equal(report.capabilitySnapshot.demoProfileLikelyConfigured, false);
-        assert.ok(report.summary.includes("Config status: missing"));
+        assert.ok(report.summary.includes("config: blocked"));
       });
     });
   });
@@ -98,7 +98,7 @@ test("doctor reports non-demo readiness when config exists but demo profile is a
       assert.equal(report.capabilitySnapshot.configExists, true);
       assert.equal(report.capabilitySnapshot.demoProfileLikelyConfigured, false);
       assert.equal(report.capabilitySnapshot.recommendedPlane, "live");
-      assert.ok(report.summary.includes("Demo profile: not ready"));
+      assert.ok(report.summary.includes("profiles: degraded"));
     });
   });
 });

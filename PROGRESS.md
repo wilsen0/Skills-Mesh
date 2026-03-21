@@ -1,21 +1,24 @@
 # TradeMesh Progress
 
-> Last updated: 2026-03-21
+> Last updated: 2026-03-22
 
 ## Current State
 
-- Version: `v0.2.0`
+- Version: `v0.3.0`
 - Product framing: `CLI Skill Mesh 2.0 for OKX`
-- Status: product-grade demo-ready runtime with guarded plan/apply/replay/export loop
+- Status: product-grade supervised-execution batch-1 (`standalone skills + active probe + demo rehearsal`)
 
 ## What Is Now Implemented
 
 ### Runtime product surface
 
 - `doctor` now renders a readiness card
+- `doctor` now supports `--probe passive|active|write` and module-level probe receipts
 - `demo "<goal>"` orchestrates `doctor -> skills graph -> plan -> apply -> replay`
 - `skills inspect <name>` exposes manifest-driven skill details
 - `skills graph` exposes the skill mesh topology
+- `skills run <name>` now executes manifest-declared standalone mini-workflows
+- `rehearse demo` now runs deterministic operations rehearsal route
 - `runs list` now shows structured run summaries
 - `export <run-id>` now writes `report.md` + `bundle.json` evidence packs
 
@@ -27,6 +30,7 @@
 - `router` is reduced to goal-signal and seed-selection logic
 - `artifacts` remain the authoritative skill handoff contract
 - `goal.intake` is now the authoritative goal interpretation contract
+- `RunRecord` is now hard-cutover `version: 2` with explicit `routeKind`
 
 ### Flagship hedge pack
 
@@ -36,6 +40,14 @@
 - `policy-gate` now surfaces capability gaps and proposal actionability during plan
 - `apply` keeps dry-run first, records structured execution receipts, and does not auto-retry writes
 - `replay` can render the route, evidence, policy verdict, execution receipt, and export pointer
+
+### Operations probe pack (new)
+
+- `env-probe` seeds probe context and baseline environment snapshot
+- `market-probe` appends market read probe receipts and refreshes market artifacts
+- `account-probe` appends account read probe receipts and refreshes goal/portfolio artifacts
+- `diagnosis-synthesizer` produces `diagnostics.readiness` module-level diagnosis
+- `rehearsal-planner` produces minimal-risk rehearsal proposals and `operations.rehearsal-plan`
 
 ### Data model additions
 
@@ -55,6 +67,16 @@
 - `ExecutionResult.durationMs`
 - `RunRecord.routeSummary`
 - `RunRecord.judgeSummary`
+- `SkillManifest.standaloneCommand`
+- `SkillManifest.standaloneRoute`
+- `SkillManifest.standaloneInputs`
+- `SkillManifest.standaloneOutputs`
+- `SkillManifest.requiredCapabilities`
+- `DoctorReport.probeMode`
+- `DoctorReport.modules`
+- `DoctorReport.probeReceipts`
+- `RunRecord.routeKind`
+- `RunRecord.entrySkill`
 
 ## Validation
 
@@ -74,22 +96,20 @@ Key verified flows:
 - policy parity between plan/apply
 - hedge ranking + scenario ranking
 - write intents never auto-retry even on retryable-looking errors
+- skills run standalone routes (including replay source-run targeting)
+- doctor passive/active/write probe modes
+- rehearse demo dry-run/execute with rehearsal artifacts
 
 ## What Still Matters Next
 
-### High value
+### Next: Batch-2 (M2)
 
-- connect to a real local OKX demo environment and rehearse `demo --execute`
-- tighten live/demo environment diagnostics beyond profile-file detection
-- polish CLI card spacing and copy for live presentation
+- approval ticket lifecycle and explicit `approve` artifact path
+- write idempotency keys and correlation ids
+- reconcile command for ambiguous execution outcomes
+- stricter supervised live approval workflow
 
-### Medium value
+### Next: Batch-3 (M3)
 
-- add richer route reasoning to `routeSummary`
-- add stable screenshots / terminal recording assets for submission
-- enrich `replay` and `export` with more compact execution receipts for judges
-
-### Lower value
-
-- add more flagship packs beyond hedging
-- expand doctrine coverage only when it changes runtime behavior
+- operator-focused replay/export rendering layers
+- second independent mini-workflow pack (`rebalance`)

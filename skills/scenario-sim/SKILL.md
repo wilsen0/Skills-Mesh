@@ -14,6 +14,11 @@ produces: [planning.proposals, planning.scenario-matrix]
 preferred_handoffs: [policy-gate]
 repeatable: false
 artifact_version: 2
+standalone_command: "trademesh skills run scenario-sim \"<goal>\""
+standalone_route: [portfolio-xray, market-scan, trade-thesis, hedge-planner, scenario-sim]
+standalone_inputs: [goal]
+standalone_outputs: [planning.proposals, planning.scenario-matrix]
+required_capabilities: [okx-cli, market-read, account-read]
 ---
 
 # Scenario Sim
