@@ -1181,11 +1181,23 @@ export async function applyRun(runId: string, options: ApplyOptions): Promise<Ru
   const manifests = await loadSkillRegistry();
   const executorManifest = manifests.find((manifest) => manifest.name === "official-executor");
   const approvalManifest = manifests.find((manifest) => manifest.name === "approval-gate");
+  const liveGuardManifest = manifests.find((manifest) => manifest.name === "live-guard");
+  const idempotencyGateManifest = manifests.find((manifest) => manifest.name === "idempotency-gate");
+  const operatorManifest = manifests.find((manifest) => manifest.name === "operator-summarizer");
   if (!executorManifest) {
     throw new Error("No official-executor skill installed");
   }
   if (options.execute && !approvalManifest) {
     throw new Error("No approval-gate skill installed. Write execution requires approval ticket lifecycle.");
+  }
+  if (!idempotencyGateManifest) {
+    throw new Error("No idempotency-gate skill installed. Apply path requires idempotency contract.");
+  }
+  if (!liveGuardManifest) {
+    throw new Error("No live-guard skill installed. Apply path requires live supervised guard contract.");
+  }
+  if (!operatorManifest) {
+    throw new Error("No operator-summarizer skill installed. Apply path requires operator summary contract.");
   }
 
   const targetPlane = options.plane ?? baseRecord.plane;
@@ -1199,6 +1211,30 @@ export async function applyRun(runId: string, options: ApplyOptions): Promise<Ru
   const artifacts = createArtifactStore(artifactSnapshot, sharedState);
   const capabilitySnapshot = await inspectOkxEnvironment();
   const proposal = resolveProposal(artifacts, options.proposalName);
+  let doctorCheckedAt: string | undefined;
+  if (targetPlane === "live" && options.execute) {
+    const liveDoctor = await runDoctor({
+      probeMode: "active",
+      plane: "live",
+    });
+    doctorCheckedAt = now();
+    putArtifact(artifacts, {
+      key: "diagnostics.probes",
+      version: currentArtifactVersion("diagnostics.probes"),
+      producer: "apply-runtime",
+      data: {
+        probeMode: "active",
+        plane: "live",
+        probeReceipts: liveDoctor.probeReceipts,
+      },
+    });
+    putArtifact(artifacts, {
+      key: "diagnostics.readiness",
+      version: currentArtifactVersion("diagnostics.readiness"),
+      producer: "apply-runtime",
+      data: liveDoctor.diagnosis,
+    });
+  }
   const decision = await evaluatePolicy({
     phase: "apply",
     artifacts,
@@ -1210,31 +1246,35 @@ export async function applyRun(runId: string, options: ApplyOptions): Promise<Ru
   });
 
   let effectiveDecision: PolicyDecision = decision;
-  putArtifact(artifacts, {
-    key: "policy.plan-decision",
-    version: currentArtifactVersion("policy.plan-decision"),
-    producer: "apply-runtime",
-    data: effectiveDecision,
-    ruleRefs: effectiveDecision.ruleRefs ?? [],
-    doctrineRefs: effectiveDecision.doctrineRefs ?? [],
-  });
-  putArtifact(artifacts, {
-    key: "execution.apply-decision",
-    version: currentArtifactVersion("execution.apply-decision"),
-    producer: "apply-runtime",
-    data: effectiveDecision,
-    ruleRefs: effectiveDecision.ruleRefs ?? [],
-    doctrineRefs: effectiveDecision.doctrineRefs ?? [],
-  });
+  const syncApplyDecisionArtifacts = (nextDecision: PolicyDecision): void => {
+    putArtifact(artifacts, {
+      key: "policy.plan-decision",
+      version: currentArtifactVersion("policy.plan-decision"),
+      producer: "apply-runtime",
+      data: nextDecision,
+      ruleRefs: nextDecision.ruleRefs ?? [],
+      doctrineRefs: nextDecision.doctrineRefs ?? [],
+    });
+    putArtifact(artifacts, {
+      key: "execution.apply-decision",
+      version: currentArtifactVersion("execution.apply-decision"),
+      producer: "apply-runtime",
+      data: nextDecision,
+      ruleRefs: nextDecision.ruleRefs ?? [],
+      doctrineRefs: nextDecision.doctrineRefs ?? [],
+    });
+  };
+  syncApplyDecisionArtifacts(effectiveDecision);
 
   const traceWithoutReplay = baseRecord.trace.filter((entry) => entry.skill !== "replay");
+  const applyTrace: SkillOutput[] = [...traceWithoutReplay];
   const approvalOutput = approvalManifest
     ? await executeSkill(approvalManifest, {
         runId: baseRecord.id,
         goal: baseRecord.goal,
         plane: targetPlane,
         manifests,
-        trace: traceWithoutReplay,
+        trace: applyTrace,
         artifacts,
         runtimeInput: {
           selectedProposal: proposal.name,
@@ -1246,7 +1286,41 @@ export async function applyRun(runId: string, options: ApplyOptions): Promise<Ru
         sharedState,
       })
     : undefined;
+  if (approvalOutput) {
+    applyTrace.push(approvalOutput);
+  }
+
+  const liveGuardOutput = await executeSkill(liveGuardManifest, {
+    runId: baseRecord.id,
+    goal: baseRecord.goal,
+    plane: targetPlane,
+    manifests,
+    trace: applyTrace,
+    artifacts,
+    runtimeInput: {
+      executeRequested: Boolean(options.execute),
+      approvalProvided: Boolean(options.approve),
+      approve: Boolean(options.approve),
+      approvedBy: options.approvedBy,
+      liveConfirm: options.liveConfirm,
+      maxOrderUsd: options.maxOrderUsd,
+      maxTotalUsd: options.maxTotalUsd,
+      doctorCheckedAt,
+      selectedProposal: proposal.name,
+    },
+    sharedState,
+  });
+  applyTrace.push(liveGuardOutput);
+
   const approvalTicket = artifacts.get<ApprovalTicket>("approval.ticket")?.data;
+  const liveGuard = artifacts.get<{
+    status?: "allowed" | "blocked";
+    reasons?: string[];
+    nextAction?: string;
+  }>("operations.live-guard")?.data;
+  const liveGuardReasons = Array.isArray(liveGuard?.reasons)
+    ? liveGuard.reasons.filter((reason): reason is string => typeof reason === "string" && reason.trim().length > 0)
+    : [];
   if (Boolean(options.execute) && (!options.approve || !options.approvedBy || !approvalTicket?.ticketId)) {
     const reasons = [
       ...effectiveDecision.reasons,
@@ -1262,22 +1336,16 @@ export async function applyRun(runId: string, options: ApplyOptions): Promise<Ru
       reasons: [...new Set(reasons)],
       approvalProvided: false,
     };
-    putArtifact(artifacts, {
-      key: "policy.plan-decision",
-      version: currentArtifactVersion("policy.plan-decision"),
-      producer: "apply-runtime",
-      data: effectiveDecision,
-      ruleRefs: effectiveDecision.ruleRefs ?? [],
-      doctrineRefs: effectiveDecision.doctrineRefs ?? [],
-    });
-    putArtifact(artifacts, {
-      key: "execution.apply-decision",
-      version: currentArtifactVersion("execution.apply-decision"),
-      producer: "apply-runtime",
-      data: effectiveDecision,
-      ruleRefs: effectiveDecision.ruleRefs ?? [],
-      doctrineRefs: effectiveDecision.doctrineRefs ?? [],
-    });
+    syncApplyDecisionArtifacts(effectiveDecision);
+  }
+  if (Boolean(options.execute) && liveGuard?.status === "blocked") {
+    effectiveDecision = {
+      ...effectiveDecision,
+      outcome: "blocked",
+      reasons: [...new Set([...effectiveDecision.reasons, ...liveGuardReasons])],
+      approvalProvided: false,
+    };
+    syncApplyDecisionArtifacts(effectiveDecision);
   }
 
   const executorOutput = await executeSkill(executorManifest, {
@@ -1285,13 +1353,45 @@ export async function applyRun(runId: string, options: ApplyOptions): Promise<Ru
     goal: baseRecord.goal,
     plane: targetPlane,
     manifests,
-    trace: approvalOutput ? [...traceWithoutReplay, approvalOutput] : traceWithoutReplay,
+    trace: applyTrace,
     artifacts,
     runtimeInput: {
       selectedProposal: proposal.name,
     },
     sharedState,
   });
+  applyTrace.push(executorOutput);
+
+  const idempotencyGateOutput = await executeSkill(idempotencyGateManifest, {
+    runId: baseRecord.id,
+    goal: baseRecord.goal,
+    plane: targetPlane,
+    manifests,
+    trace: applyTrace,
+    artifacts,
+    runtimeInput: {
+      selectedProposal: proposal.name,
+      executeRequested: Boolean(options.execute),
+      applyPlane: targetPlane,
+    },
+    sharedState,
+  });
+  applyTrace.push(idempotencyGateOutput);
+  const idempotencyCheck = artifacts.get<{
+    status?: "ok" | "blocked_reconcile_required" | "error";
+    nextAction?: string;
+    items?: Array<{ ledgerSeq?: number | null }>;
+  }>("execution.idempotency-check")?.data;
+  if (Boolean(options.execute) && idempotencyCheck?.status === "blocked_reconcile_required") {
+    const reason = "idempotency gate requires reconcile before execute.";
+    effectiveDecision = {
+      ...effectiveDecision,
+      outcome: "blocked",
+      reasons: [...new Set([...effectiveDecision.reasons, reason])],
+      approvalProvided: false,
+    };
+    syncApplyDecisionArtifacts(effectiveDecision);
+  }
 
   const bundle = extractExecutionBundle(artifacts, proposal);
   const blockedReason = effectiveDecision.outcome === "approved" ? undefined : effectiveDecision.reasons.join("; ");
@@ -1312,7 +1412,11 @@ export async function applyRun(runId: string, options: ApplyOptions): Promise<Ru
             skippedResult(intent, Boolean(options.execute), blockedReason ?? "blocked"),
           ),
         };
-  const finalBlockedReason = executionOutcome.blockedByIdempotency ?? blockedReason;
+  const finalBlockedReason = executionOutcome.blockedByIdempotency ??
+    blockedReason ??
+    (idempotencyCheck?.status === "blocked_reconcile_required"
+      ? "idempotency gate requires reconcile before execute."
+      : undefined);
   const executionOk = executionOutcome.finalResults.every((result) => result.ok);
   let status = nextStatusFromPolicy(effectiveDecision.outcome, Boolean(options.execute), executionOk);
   if (executionOutcome.blockedByIdempotency) {
@@ -1323,8 +1427,15 @@ export async function applyRun(runId: string, options: ApplyOptions): Promise<Ru
   );
   const reconciliationState: ExecutionRecord["reconciliationState"] = executionOutcome.blockedReconciliationState ??
     (Boolean(options.execute) && hasWriteFailures ? "pending" : "none");
+  const idempotencyLedgerSeqFromCheck = Array.isArray(idempotencyCheck?.items)
+    ? idempotencyCheck.items
+      .map((item) => (typeof item.ledgerSeq === "number" ? item.ledgerSeq : null))
+      .filter((value): value is number => value !== null)
+      .reduce((max, value) => Math.max(max, value), 0)
+    : 0;
 
   const execution: ExecutionRecord = {
+    executionId: `${baseRecord.id}:exec:${baseRecord.executions.length + 1}`,
     requestedAt: now(),
     mode: options.execute ? "execute" : "dry-run",
     plane: targetPlane,
@@ -1332,11 +1443,37 @@ export async function applyRun(runId: string, options: ApplyOptions): Promise<Ru
     approvalProvided: Boolean(options.approve),
     approvalTicketId: approvalTicket?.ticketId,
     idempotencyChecked: executionOutcome.idempotencyChecked === true,
+    idempotencyLedgerSeq: executionOutcome.idempotencyLedgerSeq ?? (idempotencyLedgerSeqFromCheck > 0 ? idempotencyLedgerSeqFromCheck : undefined),
+    reconciliationRequired: reconciliationState === "pending" || reconciliationState === "ambiguous",
     reconciliationState,
+    doctorCheckedAt,
     status,
     results: executionOutcome.results,
     blockedReason: finalBlockedReason,
   };
+
+  const nextActionForOperator = executionOutcome.nextSafeAction ??
+    (idempotencyCheck?.status === "blocked_reconcile_required"
+      ? (idempotencyCheck.nextAction ?? `node dist/bin/trademesh.js reconcile ${baseRecord.id}`)
+      : finalBlockedReason?.toLowerCase().includes("reconcile")
+        ? `node dist/bin/trademesh.js reconcile ${baseRecord.id}`
+        : `node dist/bin/trademesh.js export ${baseRecord.id}`);
+  const operatorOutput = await executeSkill(operatorManifest, {
+    runId: baseRecord.id,
+    goal: baseRecord.goal,
+    plane: targetPlane,
+    manifests,
+    trace: applyTrace,
+    artifacts,
+    runtimeInput: {
+      runStatus: status,
+      latestExecution: execution,
+      nextSafeAction: nextActionForOperator,
+    },
+    sharedState,
+  });
+  applyTrace.push(operatorOutput);
+  const operatorSummary = artifacts.get<OperatorSummaryV3>("report.operator-summary")?.data;
 
   const nextRecord = hydrateRecord({
     ...baseRecord,
@@ -1344,21 +1481,29 @@ export async function applyRun(runId: string, options: ApplyOptions): Promise<Ru
     status,
     selectedProposal: proposal.name,
     policyDecision: effectiveDecision,
-    trace: [...traceWithoutReplay, ...(approvalOutput ? [approvalOutput] : []), executorOutput],
+    trace: applyTrace,
     capabilitySnapshot,
     executions: [...baseRecord.executions, execution],
     errors: [...baseRecord.errors, ...executionOutcome.errors],
+    operatorState: operatorSummary
+      ? operatorSummary.requiresHumanAction
+        ? operatorSummary.blockers.length > 0 ? "blocked" : "attention"
+        : "stable"
+      : undefined,
+    lastSafeAction: operatorSummary?.nextSafeAction,
+    requiresHumanAction: operatorSummary?.requiresHumanAction,
     notes: [
       ...baseRecord.notes,
       `Apply ${status}: ${effectiveDecision.reasons.join(" | ")}`,
       ...(executionOutcome.idempotentHitCount && executionOutcome.idempotentHitCount > 0
         ? [`Idempotent hits: ${executionOutcome.idempotentHitCount}`]
         : []),
+      ...(liveGuard?.status === "blocked" ? [`Live guard blocked: ${liveGuardReasons.join(" | ")}`] : []),
+      ...(executionOutcome.nextSafeAction ? [`Next safe action: ${executionOutcome.nextSafeAction}`] : []),
       ...(executionOutcome.errors.length > 0 ? [`Execution errors recorded: ${executionOutcome.errors.length}`] : []),
     ],
     updatedAt: now(),
   });
-  putOperatorSummaryArtifact(artifacts, nextRecord, "apply-runtime");
 
   await saveRun(nextRecord);
   await saveArtifactSnapshot(runId, artifacts.snapshot());
@@ -1566,8 +1711,17 @@ async function reconcileWriteIntent(
   };
 }
 
-export async function reconcileRun(runId: string): Promise<RunRecord> {
+export async function reconcileRun(runId: string, options: ReconcileOptions = {}): Promise<RunRecord> {
   const record = await loadNormalizedRun(runId);
+  const manifests = await loadSkillRegistry();
+  const reconcileManifest = manifests.find((manifest) => manifest.name === "reconcile-engine");
+  const operatorManifest = manifests.find((manifest) => manifest.name === "operator-summarizer");
+  if (!reconcileManifest) {
+    throw new Error("No reconcile-engine skill installed");
+  }
+  if (!operatorManifest) {
+    throw new Error("No operator-summarizer skill installed");
+  }
   const latestExecution = record.executions.at(-1);
   if (!latestExecution || latestExecution.mode !== "execute") {
     throw new Error(`Run ${runId} has no execute receipt to reconcile.`);
@@ -1576,81 +1730,68 @@ export async function reconcileRun(runId: string): Promise<RunRecord> {
   const artifactSnapshot = await loadArtifactSnapshot(runId);
   const sharedState: Record<string, unknown> = {};
   const artifacts = createArtifactStore(artifactSnapshot, sharedState);
-  const writeIntents = latestExecution.results
-    .map((result) => result.intent)
-    .filter((intent) => intent.requiresWrite);
-
-  const items: ReconciliationItem[] = [];
-  for (const intent of writeIntents) {
-    const fingerprint = fingerprintWriteIntent(intent, latestExecution.plane);
-    const clientOrderRef = deriveClientOrderRef(intent);
-    const outcome = await reconcileWriteIntent(intent, latestExecution.plane);
-    if (outcome.status === "matched") {
-      await markWriteIntentExecuted({
-        fingerprint,
-        remoteOrderId: outcome.remoteOrderId,
-      });
-    } else if (outcome.status === "ambiguous") {
-      await markWriteIntentAmbiguous({
-        fingerprint,
-        lastError: outcome.reason,
-      });
-    }
-
-    items.push({
-      intentId: intent.intentId,
-      module: intent.module,
-      fingerprint,
-      clientOrderRef,
-      status: outcome.status,
-      remoteOrderId: outcome.remoteOrderId,
-      reason: outcome.reason,
-      evidence: outcome.evidence,
-    });
-  }
-
-  const status: ReconciliationReport["status"] =
-    items.length === 0 || items.every((item) => item.status === "matched")
-      ? "matched"
-      : items.some((item) => item.status === "ambiguous")
-        ? "ambiguous"
-        : "failed";
-  const nextActions =
-    status === "matched"
-      ? ["No further reconciliation action is required."]
-      : status === "ambiguous"
-        ? ["Review ambiguous matches manually, then rerun `trademesh reconcile <run-id>`."] 
-        : ["Inspect exchange history and rerun `trademesh reconcile <run-id>` when evidence is available."];
-  const report: ReconciliationReport = {
+  const traceWithoutReplay = record.trace.filter((entry) => entry.skill !== "replay");
+  const reconcileOutput = await executeSkill(reconcileManifest, {
     runId: record.id,
-    reconciledAt: now(),
-    status,
-    items,
-    nextActions,
-  };
-
-  putArtifact(artifacts, {
-    key: "execution.reconciliation",
-    version: currentArtifactVersion("execution.reconciliation"),
-    producer: "reconcile-runtime",
-    data: report,
+    goal: record.goal,
+    plane: latestExecution.plane,
+    manifests,
+    trace: traceWithoutReplay,
+    artifacts,
+    runtimeInput: {
+      execution: latestExecution,
+      reconcileSource: options.source ?? "auto",
+      reconcileWindowMin: options.windowMin ?? 120,
+    },
+    sharedState,
   });
+  const report = artifacts.get<ReconciliationReport>("execution.reconciliation")?.data;
+  if (!report) {
+    throw new Error("Reconcile engine did not produce execution.reconciliation artifact.");
+  }
 
   const reconciledExecutions = [...record.executions];
   reconciledExecutions[reconciledExecutions.length - 1] = {
     ...latestExecution,
-    reconciliationState: status,
+    reconciliationState: report.status,
+    reconciliationRequired: report.status !== "matched",
   };
+  const nextStatus: RunStatus = report.status === "matched" && record.status === "blocked" ? "executed" : record.status;
+  const operatorOutput = await executeSkill(operatorManifest, {
+    runId: record.id,
+    goal: record.goal,
+    plane: latestExecution.plane,
+    manifests,
+    trace: [...traceWithoutReplay, reconcileOutput],
+    artifacts,
+    runtimeInput: {
+      runStatus: nextStatus,
+      latestExecution: reconciledExecutions.at(-1),
+      nextSafeAction: report.status === "matched"
+        ? `node dist/bin/trademesh.js export ${record.id}`
+        : `node dist/bin/trademesh.js reconcile ${record.id}`,
+    },
+    sharedState,
+  });
+  const operatorSummary = artifacts.get<OperatorSummaryV3>("report.operator-summary")?.data;
   const nextRecord = hydrateRecord({
     ...record,
+    status: nextStatus,
+    trace: [...traceWithoutReplay, reconcileOutput, operatorOutput],
     executions: reconciledExecutions,
+    operatorState: operatorSummary
+      ? operatorSummary.requiresHumanAction
+        ? operatorSummary.blockers.length > 0 ? "blocked" : "attention"
+        : "stable"
+      : record.operatorState,
+    lastSafeAction: operatorSummary?.nextSafeAction ?? record.lastSafeAction,
+    requiresHumanAction: operatorSummary?.requiresHumanAction ?? record.requiresHumanAction,
     notes: [
       ...record.notes,
-      `Reconcile ${status}: ${items.length} write intent(s) processed.`,
+      `Reconcile ${report.status}: ${report.items.length} write intent(s) processed.`,
     ],
     updatedAt: now(),
   });
-  putOperatorSummaryArtifact(artifacts, nextRecord, "reconcile-runtime");
 
   await saveRun(nextRecord);
   await saveArtifactSnapshot(runId, artifacts.snapshot());
