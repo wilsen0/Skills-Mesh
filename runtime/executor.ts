@@ -6,14 +6,13 @@ import { currentArtifactVersion } from "./artifact-schema.js";
 import { runExplicitRoute, runPlanningGraph } from "./graph-runtime.js";
 import { formatDrawdownPct } from "./goal-intake.js";
 import {
-  checkWriteIntentIdempotency,
+  claimWriteIntentForExecution,
   deriveClientOrderRef,
   fingerprintWriteIntent,
   IdempotencyLockError,
   loadIdempotencyLedger,
   markWriteIntentAmbiguous,
   markWriteIntentExecuted,
-  markWriteIntentPending,
 } from "./idempotency.js";
 import { buildSkillGraphView, inspectSkillSurface, type SkillGraphView, type SkillRuntimeSurface } from "./mesh.js";
 import { getProjectPaths } from "./paths.js";
@@ -808,45 +807,6 @@ async function executeApplyWithIdempotency(
     };
   }
 
-  const preChecks = new Map<string, Awaited<ReturnType<typeof checkWriteIntentIdempotency>>>();
-  try {
-    for (const intent of writeIntents) {
-      const check = await checkWriteIntentIdempotency(intent, options.plane);
-      preChecks.set(intent.intentId, check);
-      if (check.status === "pending" || check.status === "ambiguous") {
-        const reason = check.status === "ambiguous"
-          ? "Write intent is ambiguous in idempotency ledger. Run `trademesh reconcile <run-id>` before re-execution."
-          : "Write intent is pending in idempotency ledger. Run `trademesh reconcile <run-id>` before re-execution.";
-        const skipped = intents.map((entry) => skippedResult(entry, true, reason));
-        return {
-          results: skipped,
-          errors: [],
-          finalResults: skipped,
-          idempotencyChecked: true,
-          idempotentHitCount: 0,
-          blockedByIdempotency: reason,
-          blockedReconciliationState: check.status === "ambiguous" ? "ambiguous" : "pending",
-          nextSafeAction: `node dist/bin/trademesh.js reconcile ${options.runId}`,
-        };
-      }
-    }
-  } catch (error) {
-    if (error instanceof IdempotencyLockError) {
-      const skipped = intents.map((entry) => skippedResult(entry, true, error.message));
-      return {
-        results: skipped,
-        errors: [],
-        finalResults: skipped,
-        idempotencyChecked: true,
-        idempotentHitCount: 0,
-        blockedByIdempotency: error.message,
-        blockedReconciliationState: "pending",
-        nextSafeAction: error.nextSafeAction,
-      };
-    }
-    throw error;
-  }
-
   const results: ExecutionResult[] = [];
   const errors: RunErrorRecord[] = [];
   const finalResults: ExecutionResult[] = [];
@@ -854,27 +814,46 @@ async function executeApplyWithIdempotency(
 
   for (let index = 0; index < intents.length; index += 1) {
     const intent = intents[index];
-    const check = intent.requiresWrite ? preChecks.get(intent.intentId) : undefined;
-    if (intent.requiresWrite && check?.status === "executed_hit") {
-      idempotentHitCount += 1;
-      const hit = skippedIdempotentResult(intent);
-      results.push(hit);
-      finalResults.push(hit);
-      continue;
-    }
-
-    const fingerprint = intent.requiresWrite
-      ? (check?.fingerprint ?? fingerprintWriteIntent(intent, options.plane))
-      : undefined;
-    if (intent.requiresWrite && fingerprint) {
+    let fingerprint: string | undefined;
+    if (intent.requiresWrite) {
       try {
-        await markWriteIntentPending({
-          fingerprint,
+        const claim = await claimWriteIntentForExecution({
           intent,
           runId: options.runId,
           proposal: options.proposal,
           plane: options.plane,
         });
+        fingerprint = claim.fingerprint;
+        if (claim.status === "executed_hit") {
+          idempotentHitCount += 1;
+          const hit = skippedIdempotentResult(intent);
+          results.push(hit);
+          finalResults.push(hit);
+          continue;
+        }
+        if (claim.status === "pending" || claim.status === "ambiguous") {
+          const reason = claim.status === "ambiguous"
+            ? "Write intent is ambiguous in idempotency ledger. Run `trademesh reconcile <run-id>` before re-execution."
+            : "Write intent is pending in idempotency ledger. Run `trademesh reconcile <run-id>` before re-execution.";
+          const blocked = skippedResult(intent, true, reason);
+          results.push(blocked);
+          finalResults.push(blocked);
+          for (let remaining = index + 1; remaining < intents.length; remaining += 1) {
+            const skipped = skippedResult(intents[remaining], true, reason);
+            results.push(skipped);
+            finalResults.push(skipped);
+          }
+          return {
+            results,
+            errors,
+            finalResults,
+            idempotencyChecked: true,
+            idempotentHitCount,
+            blockedByIdempotency: reason,
+            blockedReconciliationState: claim.status === "ambiguous" ? "ambiguous" : "pending",
+            nextSafeAction: `node dist/bin/trademesh.js reconcile ${options.runId}`,
+          };
+        }
       } catch (error) {
         if (error instanceof IdempotencyLockError) {
           const reason = error.message;

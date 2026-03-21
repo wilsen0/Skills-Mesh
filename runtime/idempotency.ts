@@ -55,6 +55,12 @@ export interface IdempotencyCheckResult {
   entry?: IdempotencyLedgerEntry;
 }
 
+export interface IdempotencyClaimResult {
+  fingerprint: string;
+  status: "claimed" | "executed_hit" | "pending" | "ambiguous";
+  entry?: IdempotencyLedgerEntry;
+}
+
 export class IdempotencyLockError extends Error {
   readonly nextSafeAction: string;
 
@@ -591,6 +597,61 @@ export async function markWriteIntentPending(input: {
       throw new Error(`Failed to persist pending idempotency entry for '${input.fingerprint}'.`);
     }
     return cloneEntry(entry);
+  });
+}
+
+export async function claimWriteIntentForExecution(input: {
+  intent: OkxCommandIntent;
+  runId: string;
+  proposal: string;
+  plane: ExecutionPlane;
+}): Promise<IdempotencyClaimResult> {
+  return withLedgerMutation(async (context) => {
+    const fingerprint = fingerprintWriteIntent(input.intent, input.plane);
+    const current = context.ledger.entries[fingerprint];
+    if (current?.status === "executed") {
+      return {
+        fingerprint,
+        status: "executed_hit",
+        entry: cloneEntry(current),
+      };
+    }
+    if (current?.status === "pending") {
+      return {
+        fingerprint,
+        status: "pending",
+        entry: cloneEntry(current),
+      };
+    }
+    if (current?.status === "ambiguous") {
+      return {
+        fingerprint,
+        status: "ambiguous",
+        entry: cloneEntry(current),
+      };
+    }
+
+    await appendAndApplyEvent(context, {
+      kind: "pending",
+      fingerprint,
+      intentId: input.intent.intentId,
+      runId: input.runId,
+      proposal: input.proposal,
+      plane: input.plane,
+      module: input.intent.module,
+      requiresWrite: input.intent.requiresWrite,
+      clientOrderRef: deriveClientOrderRef(input.intent),
+      command: input.intent.command,
+    });
+    const entry = context.ledger.entries[fingerprint];
+    if (!entry) {
+      throw new Error(`Failed to claim write intent '${input.intent.intentId}' for execution.`);
+    }
+    return {
+      fingerprint,
+      status: "claimed",
+      entry: cloneEntry(entry),
+    };
   });
 }
 

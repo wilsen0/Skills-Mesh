@@ -1,0 +1,151 @@
+{
+  "kind": "trademesh-executions",
+  "version": 3,
+  "runId": "run_20260321191330650_091",
+  "savedAt": "2026-03-21T19:13:31.072Z",
+  "executions": [
+    {
+      "executionId": "run_20260321191330650_091:exec:1",
+      "requestedAt": "2026-03-21T19:13:31.069Z",
+      "mode": "execute",
+      "plane": "demo",
+      "proposal": "protective-put",
+      "approvalProvided": true,
+      "approvalTicketId": "apt_run_20260321191330650_091_protective-put_20260321191330",
+      "idempotencyChecked": true,
+      "idempotencyLedgerSeq": 4,
+      "reconciliationRequired": false,
+      "reconciliationState": "none",
+      "status": "executed",
+      "results": [
+        {
+          "intent": {
+            "intentId": "run_20260321191330650_091:protective-put:read-balance",
+            "stepIndex": 0,
+            "safeToRetry": true,
+            "command": "okx account balance --profile demo --json",
+            "args": [
+              "okx",
+              "account",
+              "balance",
+              "--profile",
+              "demo",
+              "--json"
+            ],
+            "module": "account",
+            "requiresWrite": false,
+            "reason": "Refresh account balance before materializing execution."
+          },
+          "ok": true,
+          "exitCode": 0,
+          "stdout": "{\"code\":\"0\",\"data\":[{\"details\":[{\"ccy\":\"USDT\",\"availBal\":\"20000\",\"usdEq\":\"20000\"}]}]}\n",
+          "stderr": "",
+          "skipped": false,
+          "dryRun": false,
+          "startedAt": "2026-03-21T19:13:30.840Z",
+          "finishedAt": "2026-03-21T19:13:30.843Z",
+          "durationMs": 3,
+          "attempt": 1
+        },
+        {
+          "intent": {
+            "intentId": "run_20260321191330650_091:protective-put:read-positions",
+            "stepIndex": 1,
+            "safeToRetry": true,
+            "command": "okx account positions --profile demo --json",
+            "args": [
+              "okx",
+              "account",
+              "positions",
+              "--profile",
+              "demo",
+              "--json"
+            ],
+            "module": "account",
+            "requiresWrite": false,
+            "reason": "Refresh account positions before materializing execution."
+          },
+          "ok": true,
+          "exitCode": 0,
+          "stdout": "{\"code\":\"0\",\"data\":[{\"instId\":\"BTC-USDT-SWAP\",\"pos\":\"0.01\",\"markPx\":\"70000\",\"lever\":\"3\",\"posSide\":\"long\"},{\"instId\":\"ETH-USDT-SWAP\",\"pos\":\"0.2\",\"markPx\":\"3500\",\"lever\":\"3\",\"posSide\":\"long\"},{\"instId\":\"SOL-USDT-SWAP\",\"pos\":\"5\",\"markPx\":\"140\",\"lever\":\"3\",\"posSide\":\"long\"},{\"instId\":\"XRP-USDT-SWAP\",\"pos\":\"1400\",\"markPx\":\"0.5\",\"lever\":\"3\",\"posSide\":\"long\"}]}\n",
+          "stderr": "",
+          "skipped": false,
+          "dryRun": false,
+          "startedAt": "2026-03-21T19:13:30.843Z",
+          "finishedAt": "2026-03-21T19:13:30.847Z",
+          "durationMs": 4,
+          "attempt": 1
+        },
+        {
+          "intent": {
+            "intentId": "run_20260321191330650_091:protective-put:read-ticker:btc",
+            "stepIndex": 2,
+            "safeToRetry": true,
+            "command": "okx market ticker BTC-USDT --profile demo --json",
+            "args": [
+              "okx",
+              "market",
+              "ticker",
+              "BTC-USDT",
+              "--profile",
+              "demo",
+              "--json"
+            ],
+            "module": "market",
+            "requiresWrite": false,
+            "reason": "Refresh BTC price before materializing execution."
+          },
+          "ok": true,
+          "exitCode": 0,
+          "stdout": "{\"code\":\"0\",\"data\":[{\"instId\":\"BTC-USDT\",\"last\":\"70000\",\"open24h\":\"69000\",\"markPx\":\"69980\"}]}\n",
+          "stderr": "",
+          "skipped": false,
+          "dryRun": false,
+          "startedAt": "2026-03-21T19:13:30.847Z",
+          "finishedAt": "2026-03-21T19:13:30.850Z",
+          "durationMs": 3,
+          "attempt": 1
+        },
+        {
+          "intent": {
+            "intentId": "run_20260321191330650_091:protective-put:write:3",
+            "stepIndex": 3,
+            "safeToRetry": false,
+            "clientOrderRef": "tmbf6bd15446f69a475dd69e",
+            "command": "okx option place-order --instId BTC-USD-260327-67000-P --side buy --sz 1 --px 0.0100 --profile demo --json",
+            "args": [
+              "okx",
+              "option",
+              "place-order",
+              "--instId",
+              "BTC-USD-260327-67000-P",
+              "--side",
+              "buy",
+              "--sz",
+              "1",
+              "--px",
+              "0.0100",
+              "--profile",
+              "demo",
+              "--json"
+            ],
+            "module": "option",
+            "requiresWrite": true,
+            "reason": "Buy downside convexity for the primary concentration symbol."
+          },
+          "ok": true,
+          "exitCode": 0,
+          "stdout": "{\"code\":\"0\",\"data\":[{\"sCode\":\"0\",\"sMsg\":\"ok\"}]}\n",
+          "stderr": "",
+          "skipped": false,
+          "dryRun": false,
+          "startedAt": "2026-03-21T19:13:31.061Z",
+          "finishedAt": "2026-03-21T19:13:31.066Z",
+          "durationMs": 5,
+          "attempt": 1
+        }
+      ]
+    }
+  ],
+  "errors": []
+}
