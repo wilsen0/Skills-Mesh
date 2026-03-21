@@ -1,0 +1,116 @@
+{
+  "kind": "trademesh-executions",
+  "version": 2,
+  "runId": "run_20260321045827630_150",
+  "savedAt": "2026-03-21T04:58:39.792Z",
+  "executions": [
+    {
+      "requestedAt": "2026-03-21T04:58:39.705Z",
+      "mode": "dry-run",
+      "plane": "demo",
+      "proposal": "protective-put",
+      "approvalProvided": true,
+      "status": "dry_run",
+      "results": [
+        {
+          "intent": {
+            "command": "okx account balance --profile demo --json",
+            "args": [
+              "okx",
+              "account",
+              "balance",
+              "--profile",
+              "demo",
+              "--json"
+            ],
+            "module": "account",
+            "requiresWrite": false,
+            "reason": "Refresh account balance before materializing execution."
+          },
+          "ok": true,
+          "exitCode": 0,
+          "stdout": "",
+          "stderr": "",
+          "skipped": true,
+          "dryRun": true
+        },
+        {
+          "intent": {
+            "command": "okx account positions --profile demo --json",
+            "args": [
+              "okx",
+              "account",
+              "positions",
+              "--profile",
+              "demo",
+              "--json"
+            ],
+            "module": "account",
+            "requiresWrite": false,
+            "reason": "Refresh account positions before materializing execution."
+          },
+          "ok": true,
+          "exitCode": 0,
+          "stdout": "",
+          "stderr": "",
+          "skipped": true,
+          "dryRun": true
+        },
+        {
+          "intent": {
+            "command": "okx market ticker BTC-USDT --profile demo --json",
+            "args": [
+              "okx",
+              "market",
+              "ticker",
+              "BTC-USDT",
+              "--profile",
+              "demo",
+              "--json"
+            ],
+            "module": "market",
+            "requiresWrite": false,
+            "reason": "Refresh BTC price before materializing execution."
+          },
+          "ok": true,
+          "exitCode": 0,
+          "stdout": "",
+          "stderr": "",
+          "skipped": true,
+          "dryRun": true
+        },
+        {
+          "intent": {
+            "command": "okx option place-order --instId BTC-USD-260327-67000-P --side buy --sz 1 --px 0.0100 --profile demo --json",
+            "args": [
+              "okx",
+              "option",
+              "place-order",
+              "--instId",
+              "BTC-USD-260327-67000-P",
+              "--side",
+              "buy",
+              "--sz",
+              "1",
+              "--px",
+              "0.0100",
+              "--profile",
+              "demo",
+              "--json"
+            ],
+            "module": "option",
+            "requiresWrite": true,
+            "reason": "Buy downside convexity for the primary concentration symbol."
+          },
+          "ok": true,
+          "exitCode": 0,
+          "stdout": "",
+          "stderr": "",
+          "skipped": true,
+          "dryRun": true
+        }
+      ]
+    }
+  ],
+  "errors": []
+}
