@@ -1,0 +1,136 @@
+{
+  "kind": "trademesh-executions",
+  "version": 2,
+  "runId": "run_20260321182011854_805",
+  "savedAt": "2026-03-21T18:20:12.013Z",
+  "executions": [
+    {
+      "requestedAt": "2026-03-21T18:20:12.010Z",
+      "mode": "execute",
+      "plane": "demo",
+      "proposal": "protective-put",
+      "approvalProvided": true,
+      "idempotencyChecked": false,
+      "reconciliationState": "pending",
+      "status": "approval_required",
+      "results": [
+        {
+          "intent": {
+            "intentId": "run_20260321182011854_805:protective-put:read-balance",
+            "stepIndex": 0,
+            "safeToRetry": true,
+            "command": "okx account balance --profile demo --json",
+            "args": [
+              "okx",
+              "account",
+              "balance",
+              "--profile",
+              "demo",
+              "--json"
+            ],
+            "module": "account",
+            "requiresWrite": false,
+            "reason": "Refresh account balance before materializing execution."
+          },
+          "ok": false,
+          "exitCode": null,
+          "stdout": "",
+          "stderr": "policy gate approved this proposal; order notional=562.50 singleLimit=1000.00 totalLimit=3000.00; write execution requires --approved-by <name>; approval ticket was not issued",
+          "skipped": true,
+          "dryRun": false,
+          "durationMs": 0
+        },
+        {
+          "intent": {
+            "intentId": "run_20260321182011854_805:protective-put:read-positions",
+            "stepIndex": 1,
+            "safeToRetry": true,
+            "command": "okx account positions --profile demo --json",
+            "args": [
+              "okx",
+              "account",
+              "positions",
+              "--profile",
+              "demo",
+              "--json"
+            ],
+            "module": "account",
+            "requiresWrite": false,
+            "reason": "Refresh account positions before materializing execution."
+          },
+          "ok": false,
+          "exitCode": null,
+          "stdout": "",
+          "stderr": "policy gate approved this proposal; order notional=562.50 singleLimit=1000.00 totalLimit=3000.00; write execution requires --approved-by <name>; approval ticket was not issued",
+          "skipped": true,
+          "dryRun": false,
+          "durationMs": 0
+        },
+        {
+          "intent": {
+            "intentId": "run_20260321182011854_805:protective-put:read-ticker:btc",
+            "stepIndex": 2,
+            "safeToRetry": true,
+            "command": "okx market ticker BTC-USDT --profile demo --json",
+            "args": [
+              "okx",
+              "market",
+              "ticker",
+              "BTC-USDT",
+              "--profile",
+              "demo",
+              "--json"
+            ],
+            "module": "market",
+            "requiresWrite": false,
+            "reason": "Refresh BTC price before materializing execution."
+          },
+          "ok": false,
+          "exitCode": null,
+          "stdout": "",
+          "stderr": "policy gate approved this proposal; order notional=562.50 singleLimit=1000.00 totalLimit=3000.00; write execution requires --approved-by <name>; approval ticket was not issued",
+          "skipped": true,
+          "dryRun": false,
+          "durationMs": 0
+        },
+        {
+          "intent": {
+            "intentId": "run_20260321182011854_805:protective-put:write:3",
+            "stepIndex": 3,
+            "safeToRetry": false,
+            "clientOrderRef": "tm7af3a50011dad6e1e213da",
+            "command": "okx option place-order --instId BTC-USD-260327-67000-P --side buy --sz 1 --px 0.0100 --profile demo --json",
+            "args": [
+              "okx",
+              "option",
+              "place-order",
+              "--instId",
+              "BTC-USD-260327-67000-P",
+              "--side",
+              "buy",
+              "--sz",
+              "1",
+              "--px",
+              "0.0100",
+              "--profile",
+              "demo",
+              "--json"
+            ],
+            "module": "option",
+            "requiresWrite": true,
+            "reason": "Buy downside convexity for the primary concentration symbol."
+          },
+          "ok": false,
+          "exitCode": null,
+          "stdout": "",
+          "stderr": "policy gate approved this proposal; order notional=562.50 singleLimit=1000.00 totalLimit=3000.00; write execution requires --approved-by <name>; approval ticket was not issued",
+          "skipped": true,
+          "dryRun": false,
+          "durationMs": 0
+        }
+      ],
+      "blockedReason": "policy gate approved this proposal; order notional=562.50 singleLimit=1000.00 totalLimit=3000.00; write execution requires --approved-by <name>; approval ticket was not issued"
+    }
+  ],
+  "errors": []
+}

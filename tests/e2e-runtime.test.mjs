@@ -40,6 +40,38 @@ test("runtime supports plan -> apply --approve -> replay through mocked OKX CLI"
   }
 });
 
+test("apply execute with approved-by produces ticket and idempotent skip on repeated run", async () => {
+  const payloads = await buildReferencePayloads();
+  let runId = null;
+
+  await withMockOkx(payloads, async () => {
+    const planned = await createPlan("hedge my btc drawdown with demo execute", { plane: "demo" });
+    runId = planned.id;
+
+    const executed = await applyRun(planned.id, {
+      plane: "demo",
+      approve: true,
+      approvedBy: "alice",
+      execute: true,
+    });
+    assert.equal(executed.status, "executed");
+    assert.equal(typeof executed.executions.at(-1)?.approvalTicketId, "string");
+
+    const repeated = await applyRun(planned.id, {
+      plane: "demo",
+      approve: true,
+      approvedBy: "alice",
+      execute: true,
+    });
+    const idempotentHits = repeated.executions.at(-1)?.results.filter((result) =>
+      result.stderr.includes("skipped(idempotent-hit)")
+    ) ?? [];
+    assert.ok(idempotentHits.length >= 1);
+  });
+
+  await cleanupRunArtifacts(runId);
+});
+
 test("apply enforces research, demo, and live plane gates through the runtime", async () => {
   const payloads = await buildReferencePayloads();
   payloads.accountPositions = { code: "0", data: [] };

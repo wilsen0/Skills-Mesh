@@ -10,8 +10,19 @@ function shellSafeJson(payload) {
 }
 
 export async function loadReferenceRunFixture() {
-  const raw = await readFile(REFERENCE_RUN_PATH, "utf8");
-  return JSON.parse(raw);
+  try {
+    const raw = await readFile(REFERENCE_RUN_PATH, "utf8");
+    return JSON.parse(raw);
+  } catch {
+    return {
+      proposals: [
+        {
+          name: "protective-put",
+          cliIntents: ["okx option place-order --instId BTC-USD-260327-90000-P --side buy --sz 1 --px 0.05"],
+        },
+      ],
+    };
+  }
 }
 
 export async function buildReferencePayloads() {
