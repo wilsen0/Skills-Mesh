@@ -1,7 +1,7 @@
 {
   "name": "okx-skill-mesh",
   "version": "0.1.0",
-  "description": "CLI-native skill mesh runtime for OKX Agent Trade Kit workflows.",
+  "description": "CLI Skill Mesh 2.0 runtime for guarded OKX plan/apply/replay workflows.",
   "type": "module",
   "bin": {
     "trademesh": "./dist/bin/trademesh.js"

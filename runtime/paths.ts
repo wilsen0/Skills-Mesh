@@ -12,6 +12,15 @@ export interface ProjectPaths {
   profilesRoot: string;
 }
 
+function resolvePathOverride(name: string, fallback: string): string {
+  const raw = process.env[name];
+  if (!raw || raw.trim().length === 0) {
+    return fallback;
+  }
+
+  return resolve(raw);
+}
+
 function findProjectRoot(startDirectory: string): string {
   let current = resolve(startDirectory);
 
@@ -34,6 +43,7 @@ export function getProjectPaths(): ProjectPaths {
   const moduleDirectory = dirname(fileURLToPath(import.meta.url));
   const projectRoot = findProjectRoot(moduleDirectory);
   const meshRoot = join(projectRoot, ".trademesh");
+  const profilesRoot = resolvePathOverride("TRADEMESH_PROFILES_ROOT", join(projectRoot, "profiles"));
 
   return {
     projectRoot,
@@ -42,6 +52,6 @@ export function getProjectPaths(): ProjectPaths {
     runsRoot: join(projectRoot, "runs"),
     meshRoot,
     meshRunsRoot: join(meshRoot, "runs"),
-    profilesRoot: join(projectRoot, "profiles"),
+    profilesRoot,
   };
 }

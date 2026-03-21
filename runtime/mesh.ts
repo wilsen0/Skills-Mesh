@@ -142,7 +142,7 @@ function buildFlagshipRoute(manifests: SkillManifest[]): string[] {
   while (current && !visited.has(current.name)) {
     route.push(current.name);
     visited.add(current.name);
-    const nextName = current.preferredHandoffs[0];
+    const nextName: string | undefined = current.preferredHandoffs[0];
     current = nextName ? byName.get(nextName) : undefined;
   }
 

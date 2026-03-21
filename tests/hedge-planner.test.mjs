@@ -4,7 +4,7 @@ import { putArtifact } from "../dist/runtime/artifacts.js";
 import run from "../dist/skills/hedge-planner/run.js";
 import { buildReferencePayloads, createContext } from "./test-helpers.mjs";
 
-test("hedge-planner emits proposal set with structured intents/order plans", async () => {
+test("hedge-planner emits ranked proposal set with score breakdowns and order plans", async () => {
   const payloads = await buildReferencePayloads();
   const sharedState = {
     portfolioSnapshot: {
@@ -88,8 +88,9 @@ test("hedge-planner emits proposal set with structured intents/order plans", asy
   assert.equal(output.stage, "planner");
   assert.equal(output.proposal.length, 4);
   assert.equal(output.proposal[0].strategyId, "protective-put");
+  assert.equal(output.proposal[0].recommended, true);
   assert.ok(output.proposal[0].riskTags.includes("strategy-source:trade-thesis"));
-  assert.ok(output.proposal.every((proposal) => Array.isArray(proposal.intents)));
+  assert.ok(output.proposal.every((proposal) => proposal.scoreBreakdown));
   assert.ok(output.proposal.every((proposal) => Array.isArray(proposal.orderPlan)));
   assert.ok(Array.isArray(sharedState.proposals));
 });

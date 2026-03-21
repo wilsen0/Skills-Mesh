@@ -99,6 +99,36 @@ function rankScore(proposal: SkillProposal): number {
   return scenarioScores.reduce((sum, value) => sum + value, 0);
 }
 
+function annotateRanking(proposals: SkillProposal[]): SkillProposal[] {
+  const top = proposals[0];
+  return proposals.map((proposal, index) => {
+    const scenarioRank = rankScore(proposal);
+    const scenarioQuality = Math.max(0, Math.min(100, Math.round(scenarioRank / 4)));
+    const base = proposal.scoreBreakdown ?? {
+      total: 50,
+      protection: 50,
+      cost: 50,
+      executionRisk: 50,
+      policyFit: 50,
+        dataConfidence: 50,
+    };
+    const total = Math.max(0, Math.min(100, Math.round(base.total * 0.65 + scenarioQuality * 0.35)));
+
+    return {
+      ...proposal,
+      recommended: index === 0,
+      scoreBreakdown: {
+        ...base,
+        total,
+      },
+      rejectionReason:
+        index === 0
+          ? undefined
+          : `Stress ranking placed ${proposal.name} behind ${top?.name ?? "the top proposal"} after scenario scoring.`,
+    };
+  });
+}
+
 export default async function run(context: SkillContext): Promise<SkillOutput> {
   const proposals = [...context.artifacts.require<SkillProposal[]>("planning.proposals").data];
   const thesis = context.artifacts.require<TradeThesis>("trade.thesis").data;
@@ -115,12 +145,13 @@ export default async function run(context: SkillContext): Promise<SkillOutput> {
   });
 
   enriched.sort((left, right) => rankScore(right) - rankScore(left));
+  const ranked = annotateRanking(enriched);
 
   putArtifact(context.artifacts, {
     key: "planning.proposals",
     version: context.manifest.artifactVersion,
     producer: context.manifest.name,
-    data: enriched,
+    data: ranked,
     ruleRefs: thesis.ruleRefs,
     doctrineRefs: thesis.doctrineRefs,
   });
@@ -139,15 +170,15 @@ export default async function run(context: SkillContext): Promise<SkillOutput> {
     goal: context.goal,
     summary: "Stress every hedge proposal against the fixed scenario matrix before policy approval.",
     facts: [
-      `Scenario matrix populated for ${enriched.length} proposal(s).`,
-      `Top proposal after stress ranking: ${enriched[0]?.name ?? "n/a"}.`,
+      `Scenario matrix populated for ${ranked.length} proposal(s).`,
+      `Top proposal after stress ranking: ${ranked[0]?.name ?? "n/a"}.`,
     ],
     constraints: {
       scenarioCount: 4,
-      rankedByScenario: enriched.map((proposal) => proposal.name),
-      requiredModules: [...new Set(enriched.flatMap((proposal) => proposal.requiredModules ?? []))],
+      rankedByScenario: ranked.map((proposal) => proposal.name),
+      requiredModules: [...new Set(ranked.flatMap((proposal) => proposal.requiredModules ?? []))],
     },
-    proposal: enriched,
+    proposal: ranked,
     risk: {
       score: 0.22,
       maxLoss: "Stress outcomes are bounded by the scenario matrix, not live marks.",

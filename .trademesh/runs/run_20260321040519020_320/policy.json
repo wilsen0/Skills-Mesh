@@ -1,0 +1,53 @@
+{
+  "kind": "trademesh-policy",
+  "version": 2,
+  "runId": "run_20260321040519020_320",
+  "savedAt": "2026-03-21T04:05:19.295Z",
+  "decision": {
+    "outcome": "approved",
+    "reasons": [
+      "policy gate approved this proposal",
+      "order notional=112.50 singleLimit=1000.00 totalLimit=3000.00"
+    ],
+    "proposal": "protective-put",
+    "plane": "demo",
+    "executeRequested": false,
+    "approvalProvided": false,
+    "evaluatedAt": "2026-03-21T04:05:19.289Z",
+    "phase": "plan",
+    "ruleRefs": [
+      "max-single-order",
+      "max-total-exposure",
+      "max-symbol-concentration"
+    ],
+    "doctrineRefs": [
+      "black-swan-risk"
+    ],
+    "breachFlags": [],
+    "budgetSnapshot": {
+      "maxSingleOrderUsd": 1000,
+      "maxTotalOrderUsd": 3000,
+      "maxTotalExposureUsd": 150000,
+      "maxMarginUseUsd": 1800,
+      "maxPremiumSpendUsd": 150,
+      "maxCorrelationBucketPct": 40,
+      "marketVolatility": null,
+      "volatilityAdjusted": false,
+      "leverageAdjusted": false
+    },
+    "capabilityGaps": [
+      {
+        "id": "okx-cli",
+        "severity": "warn",
+        "message": "OKX CLI is not available on PATH; only preview-mode flows are safe right now.",
+        "remedy": "Install `okx` CLI and rerun `trademesh doctor`."
+      },
+      {
+        "id": "recommended-plane",
+        "severity": "info",
+        "message": "Current environment is better suited for research/demo preview than for executed writes.",
+        "remedy": "Use `apply --approve` without `--execute` first, then rerun doctor after environment setup."
+      }
+    ]
+  }
+}

@@ -172,7 +172,7 @@ function decorateCapabilitySnapshot(input: {
     return {
       readinessGrade: "C",
       blockers,
-      recommendedPlane: "research",
+      recommendedPlane: input.demoProfileLikelyConfigured ? "demo" : "research",
     };
   }
 

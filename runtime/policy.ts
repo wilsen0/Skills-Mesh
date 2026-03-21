@@ -577,10 +577,10 @@ function deriveCapabilityGaps(
 
 export async function evaluatePolicy(input: EvaluatePolicyInput): Promise<PolicyDecision> {
   const intents = normalizeProposalIntents(input.proposal);
-  const writes = intents.some((intent) => intent.requiresWrite);
   const orderSlicesFromPlan = parseOrderSlicesFromOrderPlan(input.proposal.orderPlan);
   const orderSlices =
     orderSlicesFromPlan.length > 0 ? orderSlicesFromPlan : parseOrderSlicesFromIntents(intents);
+  const writes = intents.some((intent) => intent.requiresWrite) || orderSlices.some((slice) => ["swap", "option", "spot"].includes(slice.module));
   const writeSlices = orderSlices.filter((slice) => slice.notionalUsd > 0);
   const proposal = input.proposal;
   const capabilityGaps = deriveCapabilityGaps(input);

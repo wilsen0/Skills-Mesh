@@ -1,0 +1,46 @@
+{
+  "kind": "trademesh-policy",
+  "version": 2,
+  "runId": "run_20260321040611336_813",
+  "savedAt": "2026-03-21T04:06:11.433Z",
+  "decision": {
+    "outcome": "require_approval",
+    "reasons": [
+      "non-research write path requires explicit --approve"
+    ],
+    "proposal": "protective-put",
+    "plane": "demo",
+    "executeRequested": false,
+    "approvalProvided": false,
+    "evaluatedAt": "2026-03-21T04:06:11.430Z",
+    "phase": "plan",
+    "ruleRefs": [
+      "max-single-order",
+      "max-total-exposure",
+      "max-symbol-concentration"
+    ],
+    "doctrineRefs": [
+      "black-swan-risk"
+    ],
+    "breachFlags": [],
+    "budgetSnapshot": {
+      "maxSingleOrderUsd": 1000,
+      "maxTotalOrderUsd": 3000,
+      "maxTotalExposureUsd": 150000,
+      "maxMarginUseUsd": 1800,
+      "maxPremiumSpendUsd": 150,
+      "maxCorrelationBucketPct": 40,
+      "marketVolatility": null,
+      "volatilityAdjusted": false,
+      "leverageAdjusted": false
+    },
+    "capabilityGaps": [
+      {
+        "id": "okx-cli",
+        "severity": "warn",
+        "message": "OKX CLI is not available on PATH; only preview-mode flows are safe right now.",
+        "remedy": "Install `okx` CLI and rerun `trademesh doctor`."
+      }
+    ]
+  }
+}

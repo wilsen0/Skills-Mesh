@@ -2,8 +2,11 @@ import { executeIntent, inspectOkxEnvironment } from "./okx.js";
 import { createArtifactStore, putArtifact } from "./artifacts.js";
 import { currentArtifactVersion } from "./artifact-schema.js";
 import { runPlanningGraph } from "./graph-runtime.js";
+import { buildSkillGraphView, inspectSkillSurface, type SkillGraphView, type SkillRuntimeSurface } from "./mesh.js";
 import { evaluatePolicy } from "./policy.js";
 import { loadSkillHandler, loadSkillRegistry } from "./registry.js";
+import { seedReasons } from "./router.js";
+import { runDoctor, type DoctorReport } from "./doctor.js";
 import {
   createRunId,
   listRunIds,
@@ -48,11 +51,25 @@ interface ReplayOptions {
   skill?: string;
 }
 
+interface DemoOptions {
+  plane: ExecutionPlane;
+  execute?: boolean;
+}
+
 interface ExecutionBundle {
   proposal: string;
   orderPlan: OrderPlanStep[];
   intents: OkxCommandIntent[];
   commandPreview?: string[];
+}
+
+export interface DemoSession {
+  doctor: DoctorReport;
+  graph: SkillGraphView;
+  planned: RunRecord;
+  applied: RunRecord;
+  replayed: RunRecord;
+  summary: string;
 }
 
 type HydrateInput = Omit<
@@ -104,6 +121,9 @@ function createFallbackCapabilitySnapshot(): CapabilitySnapshot {
     configExists: false,
     demoProfileLikelyConfigured: false,
     liveProfileLikelyConfigured: false,
+    readinessGrade: "D",
+    blockers: ["Capability snapshot was missing on this run file."],
+    recommendedPlane: "research",
     warnings: ["Capability snapshot was missing on this run file."],
   };
 }
@@ -280,6 +300,51 @@ function normalizeStatus(status: RunRecord["status"] | undefined): RunRecord["st
   return "planned";
 }
 
+function summarizeRouteReason(goal: string, manifest: SkillManifest): string {
+  const reasons = seedReasons(goal, manifest);
+  return `${manifest.name}: ${reasons.join(" | ")}`;
+}
+
+function buildRouteSummary(
+  goal: string,
+  manifests: SkillManifest[],
+  route: string[],
+): RunRecord["routeSummary"] {
+  const selected = new Set(route);
+  const byName = new Map(manifests.map((manifest) => [manifest.name, manifest]));
+  const reasons = route.map((name) => {
+    const manifest = byName.get(name);
+    return manifest ? summarizeRouteReason(goal, manifest) : `${name}: selected`;
+  });
+
+  return {
+    selectedSkills: [...route],
+    skippedSkills: manifests
+      .map((manifest) => manifest.name)
+      .filter((name) => !selected.has(name)),
+    reasons,
+  };
+}
+
+function preferredProposalName(proposals: SkillProposal[]): string | undefined {
+  return proposals.find((proposal) => proposal.recommended)?.name ?? proposals[0]?.name;
+}
+
+function buildJudgeSummary(record: RunRecord): RunRecord["judgeSummary"] {
+  const latestExecution = record.executions.at(-1);
+  const selectedProposal = record.selectedProposal ?? preferredProposalName(record.proposals);
+  const headline = latestExecution
+    ? `Guarded runtime ${latestExecution.mode === "execute" ? "executed" : "previewed"} ${selectedProposal ?? "a proposal"} on ${record.plane}.`
+    : `Guarded runtime planned ${selectedProposal ?? "a proposal"} on ${record.plane}.`;
+
+  return {
+    headline,
+    selectedProposal,
+    policyVerdict: record.policyDecision?.outcome ?? "none",
+    executionVerdict: latestExecution?.status ?? "plan_only",
+  };
+}
+
 function hydrateRecord(record: HydrateInput): RunRecord {
   const facts = collectFacts(record.trace);
   const constraints = collectConstraints(record.trace);
@@ -290,7 +355,7 @@ function hydrateRecord(record: HydrateInput): RunRecord {
   const risk = pickRunRisk(record.trace);
   const permissions = pickRunPermissions(record.trace, record.plane);
 
-  return {
+  const hydrated: RunRecord = {
     ...record,
     status: normalizeStatus(record.status),
     facts,
@@ -303,6 +368,15 @@ function hydrateRecord(record: HydrateInput): RunRecord {
     errors: record.errors ?? [],
     approved: deriveApproved(record.status, record.policyDecision),
   };
+
+  hydrated.judgeSummary = record.judgeSummary ?? buildJudgeSummary(hydrated);
+  hydrated.routeSummary = record.routeSummary ?? {
+    selectedSkills: [...hydrated.route],
+    skippedSkills: [],
+    reasons: [],
+  };
+
+  return hydrated;
 }
 
 async function loadNormalizedRun(runId: string): Promise<RunRecord> {
@@ -322,6 +396,8 @@ async function loadNormalizedRun(runId: string): Promise<RunRecord> {
     createdAt: loaded.createdAt,
     updatedAt: loaded.updatedAt,
     selectedProposal: loaded.selectedProposal,
+    routeSummary: loaded.routeSummary,
+    judgeSummary: loaded.judgeSummary,
     policyDecision: loaded.policyDecision,
     legacyProposals: loaded.proposals ?? [],
     capabilitySnapshot,
@@ -367,7 +443,7 @@ function resolveProposal(
     return explicit;
   }
 
-  return proposals[0];
+  return proposals.find((proposal) => proposal.recommended) ?? proposals[0];
 }
 
 function extractExecutionBundle(artifacts: ArtifactStore, proposal: SkillProposal): ExecutionBundle {
@@ -593,6 +669,7 @@ function initialPlanStatus(policyDecision: PolicyDecision | undefined): RunStatu
 export async function createPlan(goal: string, options: PlanOptions): Promise<RunRecord> {
   const manifests = await loadSkillRegistry();
   const runId = await createRunId();
+  const capabilitySnapshot = await inspectOkxEnvironment();
   const sharedState: Record<string, unknown> = {};
   const artifacts = createArtifactStore(undefined, sharedState);
   const graph = await runPlanningGraph({
@@ -606,14 +683,15 @@ export async function createPlan(goal: string, options: PlanOptions): Promise<Ru
       manifests,
       trace: [],
       artifacts,
-      runtimeInput: {},
+      runtimeInput: {
+        capabilitySnapshot,
+      },
       sharedState,
     },
   });
-  const capabilitySnapshot = await inspectOkxEnvironment();
   const policyDecision = artifacts.get<PolicyDecision>("policy.plan-decision")?.data;
   const proposals = proposalsFromArtifacts(artifacts);
-  const selectedProposal = proposals[0]?.name;
+  const selectedProposal = preferredProposalName(proposals);
   const route = planningRouteWithTail(graph.route, manifests);
 
   const record = hydrateRecord({
@@ -628,6 +706,7 @@ export async function createPlan(goal: string, options: PlanOptions): Promise<Ru
     selectedProposal,
     policyDecision,
     capabilitySnapshot,
+    routeSummary: buildRouteSummary(goal, manifests, route),
     executions: [],
     errors: [],
     notes: [
@@ -814,25 +893,185 @@ export async function replayRun(runId: string, options: ReplayOptions = {}): Pro
 
 interface RunListSummary {
   createdAt: string;
+  updatedAt: string;
   goal: string;
   status: string;
+  plane: string;
+  route: string[];
+  selectedProposal?: string;
 }
 
 function safeRunListSummary(raw: unknown): RunListSummary {
   if (!raw || typeof raw !== "object") {
     return {
       createdAt: "",
+      updatedAt: "",
       goal: "(invalid run record)",
       status: "unknown",
+      plane: "unknown",
+      route: [],
     };
   }
 
   const record = raw as Partial<RunRecord>;
   return {
     createdAt: typeof record.createdAt === "string" ? record.createdAt : "",
+    updatedAt: typeof record.updatedAt === "string" ? record.updatedAt : "",
     goal: typeof record.goal === "string" ? record.goal : "(missing goal)",
     status: typeof record.status === "string" ? record.status : "unknown",
+    plane: typeof record.plane === "string" ? record.plane : "unknown",
+    route: Array.isArray(record.route) ? record.route.filter((entry): entry is string => typeof entry === "string") : [],
+    selectedProposal: typeof record.selectedProposal === "string" ? record.selectedProposal : undefined,
   };
+}
+
+function truncate(value: string, max = 48): string {
+  return value.length <= max ? value : `${value.slice(0, Math.max(0, max - 1))}…`;
+}
+
+function table(headers: string[], rows: string[][]): string {
+  const widths = headers.map((header, column) =>
+    Math.max(
+      header.length,
+      ...rows.map((row) => (row[column] ?? "").length),
+    ),
+  );
+  const render = (cells: string[]) =>
+    cells.map((cell, index) => (cell ?? "").padEnd(widths[index])).join(" | ");
+
+  return [render(headers), widths.map((width) => "-".repeat(width)).join("-+-"), ...rows.map(render)].join("\n");
+}
+
+function block(title: string, lines: string[]): string {
+  return [`== ${title} ==`, ...lines, ""].join("\n");
+}
+
+function header(title: string, record: RunRecord): string[] {
+  return [
+    "TradeMesh CLI Skill Mesh 2.0",
+    title,
+    `Run: ${record.id}`,
+    `Plane: ${record.plane} | Status: ${record.status} | Goal: ${record.goal}`,
+    record.judgeSummary?.headline ?? "",
+    "",
+  ].filter(Boolean);
+}
+
+function formatExecutionResult(result: ExecutionResult): string {
+  if (result.skipped && result.dryRun) {
+    return `[preview] ${result.intent.command}`;
+  }
+  if (result.skipped) {
+    return `[skip] ${result.intent.command}`;
+  }
+  if (result.ok) {
+    return `[ok] ${result.intent.command}`;
+  }
+  return `[fail] ${result.intent.command}`;
+}
+
+function traceFacts(record: RunRecord, skillName: string, limit = 3): string[] {
+  return (latestTraceEntry(record.trace, skillName)?.facts ?? []).slice(0, limit);
+}
+
+function capabilityLines(record: RunRecord): string[] {
+  return [
+    `Readiness grade: ${record.capabilitySnapshot.readinessGrade}`,
+    `Recommended plane: ${record.capabilitySnapshot.recommendedPlane}`,
+    `OKX CLI: ${record.capabilitySnapshot.okxCliAvailable ? "detected" : "missing"}`,
+    `Profiles: demo=${record.capabilitySnapshot.demoProfileLikelyConfigured ? "ready" : "missing"} live=${record.capabilitySnapshot.liveProfileLikelyConfigured ? "ready" : "missing"}`,
+    `Blockers: ${record.capabilitySnapshot.blockers.length > 0 ? record.capabilitySnapshot.blockers.join(" | ") : "none"}`,
+  ];
+}
+
+function proposalLines(record: RunRecord): string[] {
+  if (record.proposals.length === 0) {
+    return ["No proposals were produced."];
+  }
+
+  return record.proposals.map((proposal, index) => {
+    const score = proposal.scoreBreakdown;
+    const marker = proposal.recommended ? "[recommended]" : `[#${index + 1}]`;
+    const scoreText = score
+      ? `score=${score.total} protect=${score.protection} cost=${score.cost} exec=${score.executionRisk} policy=${score.policyFit} data=${score.dataConfidence}`
+      : "score=n/a";
+    const why = proposal.recommended
+      ? proposal.reason
+      : proposal.rejectionReason ?? proposal.reason;
+    return `${marker} ${proposal.name} | ${scoreText} | ${truncate(why, 120)}`;
+  });
+}
+
+function policyLines(record: RunRecord): string[] {
+  const policy = record.policyDecision;
+  if (!policy) {
+    return ["No policy decision recorded yet."];
+  }
+
+  return [
+    `Verdict: ${policy.outcome}`,
+    `Reasons: ${policy.reasons.join(" | ") || "none"}`,
+    `Capability gaps: ${policy.capabilityGaps && policy.capabilityGaps.length > 0 ? policy.capabilityGaps.map((gap) => `[${gap.severity}] ${gap.message}`).join(" | ") : "none"}`,
+  ];
+}
+
+function nextSafeAction(record: RunRecord): string[] {
+  if (record.executions.length > 0) {
+    return [
+      `Replay: node dist/bin/trademesh.js replay ${record.id}`,
+      `Retry: node dist/bin/trademesh.js retry ${record.id}`,
+    ];
+  }
+
+  const selectedProposal = record.selectedProposal ?? preferredProposalName(record.proposals);
+  return [
+    `Preview apply: node dist/bin/trademesh.js apply ${record.id} --plane ${record.plane} --proposal ${selectedProposal ?? "<proposal>"} --approve`,
+    `Execute on demo: node dist/bin/trademesh.js apply ${record.id} --plane demo --proposal ${selectedProposal ?? "<proposal>"} --approve --execute`,
+  ];
+}
+
+function formatPlanSummary(record: RunRecord): string {
+  return [
+    ...header("Plan Review", record),
+    block("Route Selected", [
+      `Route: ${record.route.join(" -> ")}`,
+      ...(record.routeSummary?.reasons.length ? record.routeSummary.reasons : ["No route reasoning captured."]),
+    ]),
+    block("Capabilities Detected", capabilityLines(record)),
+    block("Portfolio + Market Summary", [
+      ...traceFacts(record, "portfolio-xray"),
+      ...traceFacts(record, "market-scan"),
+      ...traceFacts(record, "trade-thesis"),
+    ]),
+    block("Proposal Ranking", proposalLines(record)),
+    block("Policy Preview", policyLines(record)),
+    block("Next Safe Action", nextSafeAction(record)),
+  ].join("\n");
+}
+
+function formatApplySummary(record: RunRecord): string {
+  const latestExecution = record.executions.at(-1);
+  const commands = latestExecution?.results.map(formatExecutionResult).slice(0, 8) ?? [];
+
+  return [
+    ...header("Apply Receipt", record),
+    block("Selected Proposal", [
+      `Proposal: ${latestExecution?.proposal ?? record.selectedProposal ?? "n/a"}`,
+      `Mode: ${latestExecution?.mode ?? "n/a"}`,
+      `Approval provided: ${latestExecution?.approvalProvided ? "yes" : "no"}`,
+    ]),
+    block("Policy Verdict", policyLines(record)),
+    block("Command Preview / Execution", commands.length > 0 ? commands : ["No command preview recorded."]),
+    block("Safety Guard Summary", [
+      `Execution status: ${latestExecution?.status ?? "n/a"}`,
+      `Blocked reason: ${latestExecution?.blockedReason ?? "none"}`,
+      `Errors logged: ${record.errors.length}`,
+    ]),
+    block("Replay Pointer", [
+      `Replay: node dist/bin/trademesh.js replay ${record.id}`,
+      `Runs list: node dist/bin/trademesh.js runs list`,
+    ]),
+  ].join("\n");
 }
 
 export async function listRuns(): Promise<{ runs: RunListSummary[]; summary: string }> {
@@ -850,11 +1089,22 @@ export async function listRuns(): Promise<{ runs: RunListSummary[]; summary: str
     )
   )
     .filter((entry): entry is RunListSummary => Boolean(entry))
-    .sort((left, right) => right.createdAt.localeCompare(left.createdAt));
+    .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt));
 
-  const summary = runs
-    .map((run) => `${run.createdAt || "n/a"} | ${run.status} | ${run.goal}`)
-    .join("\n");
+  const summary = [
+    "TradeMesh Runs",
+    table(
+      ["Updated", "Plane", "Status", "Route", "Proposal", "Goal"],
+      runs.map((run) => [
+        run.updatedAt || run.createdAt || "n/a",
+        run.plane,
+        run.status,
+        truncate(run.route.join(" -> "), 32),
+        run.selectedProposal ?? "n/a",
+        truncate(run.goal, 44),
+      ]),
+    ),
+  ].join("\n\n");
 
   return {
     runs,
@@ -864,149 +1114,138 @@ export async function listRuns(): Promise<{ runs: RunListSummary[]; summary: str
 
 export async function printSkillList(): Promise<{ manifests: SkillManifest[]; summary: string }> {
   const manifests = await loadSkillRegistry();
-  const lines = manifests.map(
-    (manifest) =>
-      `${manifest.name.padEnd(18)} ${manifest.stage.padEnd(10)} ${manifest.writes ? "write" : "read "} ${manifest.description}`,
-  );
+  const summary = [
+    "TradeMesh Installed Skills",
+    table(
+      ["Skill", "Stage", "Role", "Mode", "Writes", "Description"],
+      manifests.map((manifest) => [
+        manifest.name,
+        manifest.stage,
+        manifest.role,
+        manifest.alwaysOn ? "always-on" : "on-demand",
+        manifest.writes ? "yes" : "no",
+        truncate(manifest.description, 48),
+      ]),
+    ),
+  ].join("\n\n");
 
   return {
     manifests,
-    summary: lines.join("\n"),
+    summary,
   };
 }
 
-function formatExecutionResult(result: ExecutionResult): string {
-  if (result.skipped) {
-    return `[skip] ${result.intent.command}`;
+export async function inspectSkill(skillName: string): Promise<{ skill: SkillRuntimeSurface; summary: string }> {
+  const manifests = await loadSkillRegistry();
+  const skill = inspectSkillSurface(manifests, skillName);
+  if (!skill) {
+    throw new Error(`Skill '${skillName}' was not found in the local registry.`);
   }
 
-  if (result.ok) {
-    return `[ok] ${result.intent.command}`;
-  }
+  const summary = [
+    "TradeMesh Skill Inspect",
+    `Skill: ${skill.name}`,
+    "",
+    block("Manifest", [
+      `Stage: ${skill.stage}`,
+      `Role: ${skill.role}`,
+      `Writes: ${skill.writes ? "yes" : "no"}`,
+      `Risk level: ${skill.riskLevel}`,
+      `Description: ${skill.description}`,
+    ]),
+    block("Contracts", [
+      `Consumes: ${skill.consumes.length > 0 ? skill.consumes.join(", ") : "none"}`,
+      `Produces: ${skill.produces.length > 0 ? skill.produces.join(", ") : "none"}`,
+      `Preferred handoffs: ${skill.preferredHandoffs.length > 0 ? skill.preferredHandoffs.join(", ") : "none"}`,
+      `Allowed execution modules: ${skill.allowedExecutionModules.length > 0 ? skill.allowedExecutionModules.join(", ") : "none"}`,
+    ]),
+    block("Routing Signals", [
+      `Requires: ${skill.requires.length > 0 ? skill.requires.join(", ") : "none"}`,
+      `Triggers: ${skill.triggers.length > 0 ? skill.triggers.join(", ") : "none"}`,
+    ]),
+  ].join("\n");
 
-  return `[fail] ${result.intent.command}`;
+  return { skill, summary };
+}
+
+export async function describeSkillGraph(): Promise<{ graph: SkillGraphView; summary: string }> {
+  const manifests = await loadSkillRegistry();
+  const graph = buildSkillGraphView(manifests);
+  const summary = [
+    "TradeMesh Skill Mesh Graph",
+    `Flagship route: ${graph.flagshipRoute.join(" -> ") || "n/a"}`,
+    "",
+    block("Nodes", graph.nodes.map((node) =>
+      `${node.name} [${node.stage}/${node.role}] writes=${node.writes ? "yes" : "no"} consumes=${node.consumes.length} produces=${node.produces.length}`,
+    )),
+    block("Edges", graph.edges.map((edge) => `${edge.from} -> ${edge.to} (${edge.kind}: ${edge.label})`)),
+  ].join("\n");
+
+  return {
+    graph,
+    summary,
+  };
+}
+
+export async function runDemo(goal: string, options: DemoOptions): Promise<DemoSession> {
+  const doctor = await runDoctor();
+  const graph = await describeSkillGraph();
+  const planned = await createPlan(goal, {
+    plane: options.plane,
+  });
+  const applied = await applyRun(planned.id, {
+    plane: options.plane,
+    proposalName: planned.selectedProposal,
+    approve: true,
+    execute: Boolean(options.execute),
+  });
+  const replayed = await replayRun(planned.id);
+
+  const summary = [
+    "TradeMesh CLI Skill Mesh 2.0 Demo",
+    `Goal: ${goal}`,
+    "",
+    doctor.summary,
+    graph.summary,
+    formatRunSummary(planned),
+    formatRunSummary(applied),
+    formatReplay(replayed),
+  ].join("\n\n");
+
+  return {
+    doctor,
+    graph: graph.graph,
+    planned,
+    applied,
+    replayed,
+    summary,
+  };
 }
 
 export function formatRunSummary(record: RunRecord): string {
-  const policy = record.policyDecision;
-  const proposalLines = record.proposals.map((proposal, index) => {
-    const normalized = normalizeProposal(proposal);
-    const writeIntentCount = (normalized.intents ?? []).filter((intent) => intent.requiresWrite).length;
-
-    return `${index + 1}. ${normalized.name} | cost=${normalized.estimatedCost ?? "n/a"} | protection=${normalized.estimatedProtection ?? "n/a"} | writeIntents=${writeIntentCount}`;
-  });
-  const summary = [
-    `Run: ${record.id}`,
-    `Status: ${record.status}`,
-    `Plane: ${record.plane}`,
-    `Goal: ${record.goal}`,
-    `Route: ${record.route.join(" -> ")}`,
-    `Capability: okx=${record.capabilitySnapshot.okxCliAvailable ? "yes" : "no"} demo=${record.capabilitySnapshot.demoProfileLikelyConfigured ? "yes" : "no"} live=${record.capabilitySnapshot.liveProfileLikelyConfigured ? "yes" : "no"}`,
-    proposalLines.length ? "Proposals:" : "Proposals: none",
-    ...proposalLines,
-  ];
-
-  if (policy) {
-    summary.push(`Policy: ${policy.outcome}`);
-    summary.push(...policy.reasons.map((reason) => `- ${reason}`));
-  }
-
-  const latestExecution = record.executions.at(-1);
-  if (latestExecution) {
-    summary.push(
-      `Execution: mode=${latestExecution.mode} proposal=${latestExecution.proposal} status=${latestExecution.status}`,
-    );
-    if (latestExecution.blockedReason) {
-      summary.push(`Execution blocked: ${latestExecution.blockedReason}`);
-    }
-    summary.push(...latestExecution.results.map(formatExecutionResult));
-  }
-  if (record.errors.length > 0) {
-    const latestError = record.errors.at(-1)!;
-    summary.push(
-      `Errors: ${record.errors.length} (latest: ${latestError.category} ${latestError.intent.command} attempt=${latestError.attempt})`,
-    );
-  }
-
-  return summary.join("\n");
+  return record.executions.length > 0 ? formatApplySummary(record) : formatPlanSummary(record);
 }
 
 export function formatReplay(record: RunRecord): string {
   const replayEntry = [...record.trace].reverse().find((entry) => entry.skill === "replay");
-  const lines = [
-    `Run: ${record.id}`,
-    `Created: ${record.createdAt}`,
-    `Updated: ${record.updatedAt}`,
-    `Status: ${record.status}`,
-    `Plane: ${record.plane}`,
-    `Goal: ${record.goal}`,
-    `Approved: ${record.approved ? "yes" : "no"}`,
-    "",
-  ];
+  const timelineRaw = Array.isArray(replayEntry?.metadata?.timeline) ? replayEntry.metadata?.timeline as string[] : [];
+  const artifactRaw = Array.isArray(replayEntry?.metadata?.artifacts) ? replayEntry.metadata?.artifacts as string[] : [];
+  const evidenceRaw = Array.isArray(replayEntry?.metadata?.evidence) ? replayEntry.metadata?.evidence as string[] : [];
+  const latestExecution = record.executions.at(-1);
+  const selectedProposal = record.selectedProposal ?? preferredProposalName(record.proposals);
 
-  if (record.policyDecision) {
-    lines.push(`policy: ${record.policyDecision.outcome}`);
-    lines.push(`policy reasons: ${record.policyDecision.reasons.join(" | ")}`);
-    lines.push("");
-  }
-
-  const replayFacts = replayEntry?.facts ?? [];
-  if (replayFacts.length > 0) {
-    lines.push(`facts: ${replayFacts.join(" | ")}`);
-  }
-
-  if (record.proposals.length > 0) {
-    lines.push(`proposals: ${record.proposals.map((proposal) => proposal.name).join(", ")}`);
-  }
-
-  if (replayEntry) {
-    const timelineRaw = replayEntry.metadata?.timeline;
-    const artifactRaw = replayEntry.metadata?.artifacts;
-    const evidenceRaw = replayEntry.metadata?.evidence;
-    if (Array.isArray(timelineRaw) && timelineRaw.length > 0) {
-      lines.push("");
-      lines.push("timeline:");
-      lines.push(...timelineRaw.filter((item): item is string => typeof item === "string").map((item) => `- ${item}`));
-    }
-    if (Array.isArray(artifactRaw) && artifactRaw.length > 0) {
-      lines.push("");
-      lines.push("artifacts:");
-      lines.push(...artifactRaw.filter((item): item is string => typeof item === "string").map((item) => `- ${item}`));
-    }
-    if (Array.isArray(evidenceRaw) && evidenceRaw.length > 0) {
-      lines.push("");
-      lines.push("evidence:");
-      lines.push(...evidenceRaw.filter((item): item is string => typeof item === "string").map((item) => `- ${item}`));
-    }
-  }
-
-  if (record.executions.length > 0) {
-    lines.push("");
-    lines.push("executions:");
-    for (const execution of record.executions) {
-      lines.push(
-        `- ${execution.requestedAt} mode=${execution.mode} proposal=${execution.proposal} status=${execution.status} approve=${execution.approvalProvided ? "yes" : "no"}`,
-      );
-      if (execution.blockedReason) {
-        lines.push(`  blocked: ${execution.blockedReason}`);
-      }
-      for (const result of execution.results) {
-        lines.push(`  ${formatExecutionResult(result)}`);
-      }
-    }
-  }
-
-  if (record.errors.length > 0) {
-    lines.push("");
-    lines.push("error-log:");
-    for (const error of record.errors) {
-      lines.push(
-        `- ${error.at} category=${error.category} attempt=${error.attempt} module=${error.module} retried=${error.retried ? "yes" : "no"}`,
-      );
-      lines.push(`  command: ${error.intent.command}`);
-      lines.push(`  message: ${error.message}`);
-    }
-  }
-
-  return lines.join("\n");
+  return [
+    ...header("Replay Timeline", record),
+    block("Run Snapshot", [
+      `Approved: ${record.approved ? "yes" : "no"}`,
+      `Selected proposal: ${selectedProposal ?? "n/a"}`,
+      `Policy verdict: ${record.policyDecision?.outcome ?? "none"}`,
+      `Execution verdict: ${latestExecution?.status ?? "none"}`,
+    ]),
+    block("Timeline", timelineRaw.length > 0 ? timelineRaw : ["No replay timeline captured."]),
+    block("Artifact Handoffs", artifactRaw.length > 0 ? artifactRaw : ["No artifact handoffs captured."]),
+    block("Policy Decision", policyLines(record)),
+    block("Execution Receipt", latestExecution ? latestExecution.results.map(formatExecutionResult) : ["No execution receipt recorded."]),
+    ...(evidenceRaw.length > 0 ? [block("Evidence", evidenceRaw)] : []),
+  ].join("\n");
 }

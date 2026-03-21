@@ -1,47 +1,101 @@
-# OKX Skill Mesh
+# TradeMesh CLI Skill Mesh 2.0 for OKX
 
-`okx-skill-mesh` is a CLI-first scaffold for a guarded multi-skill trading runtime.
+`okx-skill-mesh` is a CLI-native runtime that turns `okx` CLI into a guarded, auditable skill mesh.
 
-Current scope:
+This repo is not a generic agent framework and not a web app shell. Its product claim is narrower and stronger:
 
-- scans local `skills/*/SKILL.md` files as the runtime registry
-- treats `SKILL.md` as the primary contract and local `run.ts` handlers as optional runtime enhancers
-- runs a minimal planning chain for risk-reduction workflows
-- stores auditable traces in `runs/*.json`
-- generates safe execution previews instead of placing live orders
+- `okx` CLI is the only execution kernel
+- each skill is the only extension unit
+- `official-executor` is the only write path
+- `runs/` and `.trademesh/runs/` are the auditable source of truth
 
-Quick start:
+The flagship pack is a hedge workflow:
+
+`portfolio-xray -> market-scan -> trade-thesis -> hedge-planner -> scenario-sim -> policy-gate -> official-executor -> replay`
+
+That flagship pack proves the runtime. It is not the whole product identity.
+
+## Why this shape
+
+TradeMesh is optimized for hackathon judging and operator trust:
+
+- `doctor` shows whether the local mesh is ready to plan, dry-run, or execute on OKX demo
+- `skills inspect` and `skills graph` expose the mesh topology from skill manifests
+- `plan` produces ranked proposals plus a policy preview
+- `apply` keeps dry-run first and routes every write through `official-executor`
+- `replay` reconstructs the route, evidence, policy, and execution receipt
+
+## Quick Start
 
 ```bash
 npm install
 npm run build
 node dist/bin/trademesh.js doctor
-node dist/bin/trademesh.js skills list
-node dist/bin/trademesh.js plan "把未来24小时 BTC 下跌 5% 的最大回撤压到 2.5% 内"
-node dist/bin/trademesh.js plan "把未来24小时 BTC 下跌 5% 的最大回撤压到 2.5% 内，先给我 demo 方案"
-node dist/bin/trademesh.js replay <run-id> --skill portfolio-xray
-node dist/bin/trademesh.js apply <run-id> --profile demo --proposal perp-light-hedge
-node dist/bin/trademesh.js apply <run-id> --profile demo --approve
-node dist/bin/trademesh.js apply <run-id> --profile demo --approve --execute
-node dist/bin/trademesh.js retry <run-id>
+node dist/bin/trademesh.js skills ls
+node dist/bin/trademesh.js skills graph
+node dist/bin/trademesh.js plan "hedge my BTC drawdown with demo first" --plane demo
+node dist/bin/trademesh.js apply <run-id> --plane demo --proposal protective-put --approve
+node dist/bin/trademesh.js replay <run-id>
+node dist/bin/trademesh.js demo "hedge my BTC drawdown with demo first" --plane demo
 pnpm test
 ```
 
-Main commands:
+## Core Commands
 
 - `trademesh doctor`
+- `trademesh demo "<goal>" [--plane research|demo|live] [--execute] [--json]`
 - `trademesh skills ls|list`
+- `trademesh skills inspect <name> [--json]`
+- `trademesh skills graph [--json]`
 - `trademesh runs list`
 - `trademesh plan "<goal>" [--plane research|demo|live] [--profile demo|live] [--json]`
+- `trademesh apply <run-id> [--plane demo|live] [--profile demo|live] [--proposal <name>] [--approve] [--execute] [--json]`
 - `trademesh replay <run-id> [--skill <name>] [--json]`
 - `trademesh retry <run-id> [--json]`
-- `trademesh apply <run-id> [--plane demo|live] [--profile demo|live] [--proposal <name>] [--approve] [--execute] [--json]`
 
-Behavior notes:
+## Safety Model
 
-- `plan` defaults to `research` unless the goal text or flags request `demo` or `live`
-- `apply` uses the run's current plane unless you override it with `--plane` or `--profile`
-- `apply` now records structured `policyDecision` and `executions[]` for every request
-- use `--approve` to satisfy approval-required policies and `--execute` to run commands instead of dry-run
-- `official-executor` emits structured command intents and execution previews
-# Agile-Skill-Orchestration-Engine
+- custom skills do not place orders directly
+- `research` blocks all write intents
+- `demo` defaults to preview-first, and `--execute` is explicit
+- `live` still requires `--approve`
+- every plan/apply/replay persists an auditable run record
+
+## Demo Script
+
+Use this sequence for a live demo:
+
+```bash
+node dist/bin/trademesh.js doctor
+node dist/bin/trademesh.js skills graph
+node dist/bin/trademesh.js plan "hedge my BTC drawdown with demo first" --plane demo
+node dist/bin/trademesh.js apply <run-id> --plane demo --proposal protective-put --approve
+node dist/bin/trademesh.js replay <run-id>
+```
+
+If local OKX demo credentials are configured and you want the final proof point:
+
+```bash
+node dist/bin/trademesh.js demo "hedge my BTC drawdown with demo first" --plane demo --execute
+```
+
+## Architecture
+
+Three layers define the system:
+
+- Execution Kernel
+  - `okx ... --json`
+- Skill Runtime
+  - registry, graph runtime, artifact store, policy, trace persistence, CLI presentation
+- Skill Packs
+  - `skills/*/SKILL.md` + optional `run.ts`
+
+The knowledge layer under `docs/books`, `docs/rules`, `rules/`, and `doctrines/` supports the flagship hedge pack. It is not the main product headline.
+
+## Important Note
+
+This is a guarded hackathon runtime, not a production trading engine.
+
+- use `apply` without `--execute` first
+- review policy and command preview before any write path
+- prefer the `demo` plane before touching `live`

@@ -259,6 +259,9 @@ test("policy evaluator returns the same decision in plan/apply parity when input
       configExists: true,
       demoProfileLikelyConfigured: true,
       liveProfileLikelyConfigured: false,
+      readinessGrade: "A",
+      blockers: [],
+      recommendedPlane: "demo",
       warnings: [],
     },
   });

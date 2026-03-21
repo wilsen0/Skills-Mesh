@@ -3,12 +3,15 @@
 import process from "node:process";
 import {
   applyRun,
+  describeSkillGraph,
   createPlan,
   formatReplay,
   formatRunSummary,
+  inspectSkill,
   listRuns,
   printSkillList,
   replayRun,
+  runDemo,
   retryRun,
 } from "../runtime/executor.js";
 import { runDoctor } from "../runtime/doctor.js";
@@ -55,7 +58,10 @@ function parseArgs(args: string[]): ParsedArgs {
 function printHelp(): void {
   console.log(`Usage:
   trademesh doctor
+  trademesh demo "<goal>" [--plane research|demo|live] [--execute] [--json]
   trademesh skills ls|list
+  trademesh skills inspect <name> [--json]
+  trademesh skills graph [--json]
   trademesh runs list
   trademesh plan "<goal>" [--plane research|demo|live] [--profile demo|live] [--json]
   trademesh replay <run-id> [--skill <name>] [--json]
@@ -122,9 +128,44 @@ async function main(): Promise<void> {
     return;
   }
 
+  if (command === "demo") {
+    const parsed = parseArgs(args.slice(1));
+    const goal = parsed.positionals.join(" ").trim();
+
+    if (!goal) {
+      throw new Error("Missing goal. Example: trademesh demo \"hedge my BTC drawdown with demo first\"");
+    }
+
+    const session = await runDemo(goal, {
+      plane: resolvePlanPlane(goal, parsed.flags.plane, parsed.flags.profile),
+      execute: parsed.flags.execute === true,
+    });
+
+    console.log(jsonMode ? JSON.stringify(session, null, 2) : session.summary);
+    return;
+  }
+
   if (command === "skills" && (args[1] === "ls" || args[1] === "list")) {
     const listing = await printSkillList();
     console.log(jsonMode ? JSON.stringify(listing, null, 2) : listing.summary);
+    return;
+  }
+
+  if (command === "skills" && args[1] === "inspect") {
+    const parsed = parseArgs(args.slice(2));
+    const skillName = parsed.positionals[0];
+    if (!skillName) {
+      throw new Error("Missing skill name. Example: trademesh skills inspect hedge-planner");
+    }
+
+    const inspection = await inspectSkill(skillName);
+    console.log(jsonMode ? JSON.stringify(inspection, null, 2) : inspection.summary);
+    return;
+  }
+
+  if (command === "skills" && args[1] === "graph") {
+    const graph = await describeSkillGraph();
+    console.log(jsonMode ? JSON.stringify(graph, null, 2) : graph.summary);
     return;
   }
 

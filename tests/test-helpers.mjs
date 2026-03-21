@@ -130,6 +130,15 @@ echo '{"code":"0","data":[]}'
   }
 }
 
+export async function cleanupRunArtifacts(runId) {
+  if (!runId) {
+    return;
+  }
+
+  await rm(join(process.cwd(), "runs", `${runId}.json`), { force: true });
+  await rm(join(process.cwd(), ".trademesh", "runs", runId), { recursive: true, force: true });
+}
+
 export function createContext({
   runId = "run_test",
   goal = "hedge my btc drawdown with demo first",

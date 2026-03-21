@@ -8,7 +8,27 @@ import type {
 } from "../../runtime/types.js";
 
 const DEFAULT_SYMBOLS = ["BTC", "ETH", "SOL"];
-const IGNORED_SYMBOLS = new Set(["CLI", "OKX", "JSON", "DEMO", "LIVE"]);
+const IGNORED_SYMBOLS = new Set([
+  "CLI",
+  "OKX",
+  "JSON",
+  "DEMO",
+  "LIVE",
+  "HEDGE",
+  "DRAWDOWN",
+  "PROTECT",
+  "DOWNSIDE",
+  "FIRST",
+  "WITH",
+  "RISK",
+  "PLAN",
+  "APPLY",
+  "EXECUTE",
+  "ORDER",
+  "MY",
+  "THE",
+  "AND",
+]);
 
 type JsonRecord = Record<string, unknown>;
 
