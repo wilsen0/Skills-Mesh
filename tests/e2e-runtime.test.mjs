@@ -1,9 +1,12 @@
 import assert from "node:assert/strict";
-import { readFile } from "node:fs/promises";
+import { readFile, rm } from "node:fs/promises";
+import { join } from "node:path";
 import test from "node:test";
 import { applyRun, createPlan, exportRun, listRuns, replayRun } from "../dist/runtime/executor.js";
 import { loadArtifactSnapshot } from "../dist/runtime/trace.js";
 import { buildReferencePayloads, cleanupRunArtifacts, withMockOkx } from "./test-helpers.mjs";
+
+const LEDGER_PATH = join(process.cwd(), ".trademesh", "ledgers", "idempotency.json");
 
 test("runtime supports plan -> apply --approve -> replay through mocked OKX CLI", async () => {
   const payloads = await buildReferencePayloads();
@@ -45,6 +48,7 @@ test("apply execute with approved-by produces ticket and idempotent skip on repe
   let runId = null;
   const previousCorrelationCap = process.env.TRADEMESH_MAX_CORRELATION_BUCKET_PCT;
   process.env.TRADEMESH_MAX_CORRELATION_BUCKET_PCT = "100";
+  await rm(LEDGER_PATH, { force: true });
 
   try {
     await withMockOkx(payloads, async () => {
@@ -80,6 +84,7 @@ test("apply execute with approved-by produces ticket and idempotent skip on repe
   }
 
   await cleanupRunArtifacts(runId);
+  await rm(LEDGER_PATH, { force: true });
 });
 
 test("apply enforces research, demo, and live plane gates through the runtime", async () => {

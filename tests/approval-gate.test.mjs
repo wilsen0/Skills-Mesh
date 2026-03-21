@@ -1,14 +1,19 @@
 import assert from "node:assert/strict";
+import { rm } from "node:fs/promises";
+import { join } from "node:path";
 import test from "node:test";
 import { applyRun, createPlan } from "../dist/runtime/executor.js";
 import { loadArtifactSnapshot } from "../dist/runtime/trace.js";
 import { buildReferencePayloads, cleanupRunArtifacts, withMockOkx } from "./test-helpers.mjs";
+
+const LEDGER_PATH = join(process.cwd(), ".trademesh", "ledgers", "idempotency.json");
 
 test("apply execute requires --approved-by and emits approval ticket when provided", async () => {
   const payloads = await buildReferencePayloads();
   let runId = null;
   const previousCorrelationCap = process.env.TRADEMESH_MAX_CORRELATION_BUCKET_PCT;
   process.env.TRADEMESH_MAX_CORRELATION_BUCKET_PCT = "100";
+  await rm(LEDGER_PATH, { force: true });
 
   try {
     await withMockOkx(payloads, async () => {
@@ -49,4 +54,5 @@ test("apply execute requires --approved-by and emits approval ticket when provid
   }
 
   await cleanupRunArtifacts(runId);
+  await rm(LEDGER_PATH, { force: true });
 });
