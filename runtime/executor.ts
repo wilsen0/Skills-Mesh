@@ -538,6 +538,7 @@ function skippedResult(
   executeRequested: boolean,
   reason: string,
 ): ExecutionResult {
+  const ts = now();
   return {
     intent,
     ok: false,
@@ -546,11 +547,14 @@ function skippedResult(
     stderr: reason,
     skipped: true,
     dryRun: !executeRequested,
+    startedAt: ts,
+    finishedAt: ts,
     durationMs: 0,
   };
 }
 
 function skippedIdempotentResult(intent: OkxCommandIntent): ExecutionResult {
+  const ts = now();
   return {
     intent,
     ok: true,
@@ -559,6 +563,8 @@ function skippedIdempotentResult(intent: OkxCommandIntent): ExecutionResult {
     stderr: "skipped(idempotent-hit)",
     skipped: true,
     dryRun: false,
+    startedAt: ts,
+    finishedAt: ts,
     durationMs: 0,
   };
 }
@@ -604,8 +610,10 @@ interface ExecutionWithRecovery {
   finalResults: ExecutionResult[];
   idempotencyChecked?: boolean;
   idempotentHitCount?: number;
+  idempotencyLedgerSeq?: number;
   blockedByIdempotency?: string;
   blockedReconciliationState?: "pending" | "ambiguous";
+  nextSafeAction?: string;
 }
 
 function classifyExecutionFailure(result: ExecutionResult): ExecutionErrorCategory {
@@ -801,24 +809,42 @@ async function executeApplyWithIdempotency(
   }
 
   const preChecks = new Map<string, Awaited<ReturnType<typeof checkWriteIntentIdempotency>>>();
-  for (const intent of writeIntents) {
-    const check = await checkWriteIntentIdempotency(intent, options.plane);
-    preChecks.set(intent.intentId, check);
-    if (check.status === "pending" || check.status === "ambiguous") {
-      const reason = check.status === "ambiguous"
-        ? "Write intent is ambiguous in idempotency ledger. Run `trademesh reconcile <run-id>` before re-execution."
-        : "Write intent is pending in idempotency ledger. Run `trademesh reconcile <run-id>` before re-execution.";
-      const skipped = intents.map((entry) => skippedResult(entry, true, reason));
+  try {
+    for (const intent of writeIntents) {
+      const check = await checkWriteIntentIdempotency(intent, options.plane);
+      preChecks.set(intent.intentId, check);
+      if (check.status === "pending" || check.status === "ambiguous") {
+        const reason = check.status === "ambiguous"
+          ? "Write intent is ambiguous in idempotency ledger. Run `trademesh reconcile <run-id>` before re-execution."
+          : "Write intent is pending in idempotency ledger. Run `trademesh reconcile <run-id>` before re-execution.";
+        const skipped = intents.map((entry) => skippedResult(entry, true, reason));
+        return {
+          results: skipped,
+          errors: [],
+          finalResults: skipped,
+          idempotencyChecked: true,
+          idempotentHitCount: 0,
+          blockedByIdempotency: reason,
+          blockedReconciliationState: check.status === "ambiguous" ? "ambiguous" : "pending",
+          nextSafeAction: `node dist/bin/trademesh.js reconcile ${options.runId}`,
+        };
+      }
+    }
+  } catch (error) {
+    if (error instanceof IdempotencyLockError) {
+      const skipped = intents.map((entry) => skippedResult(entry, true, error.message));
       return {
         results: skipped,
         errors: [],
         finalResults: skipped,
         idempotencyChecked: true,
         idempotentHitCount: 0,
-        blockedByIdempotency: reason,
-        blockedReconciliationState: check.status === "ambiguous" ? "ambiguous" : "pending",
+        blockedByIdempotency: error.message,
+        blockedReconciliationState: "pending",
+        nextSafeAction: error.nextSafeAction,
       };
     }
+    throw error;
   }
 
   const results: ExecutionResult[] = [];
@@ -841,23 +867,54 @@ async function executeApplyWithIdempotency(
       ? (check?.fingerprint ?? fingerprintWriteIntent(intent, options.plane))
       : undefined;
     if (intent.requiresWrite && fingerprint) {
-      await markWriteIntentPending({
-        fingerprint,
-        intent,
-        runId: options.runId,
-        proposal: options.proposal,
-        plane: options.plane,
-      });
+      try {
+        await markWriteIntentPending({
+          fingerprint,
+          intent,
+          runId: options.runId,
+          proposal: options.proposal,
+          plane: options.plane,
+        });
+      } catch (error) {
+        if (error instanceof IdempotencyLockError) {
+          const reason = error.message;
+          const blocked = skippedResult(intent, true, reason);
+          results.push(blocked);
+          finalResults.push(blocked);
+          for (let remaining = index + 1; remaining < intents.length; remaining += 1) {
+            const skipped = skippedResult(intents[remaining], true, reason);
+            results.push(skipped);
+            finalResults.push(skipped);
+          }
+          return {
+            results,
+            errors,
+            finalResults,
+            idempotencyChecked: true,
+            idempotentHitCount,
+            blockedByIdempotency: reason,
+            blockedReconciliationState: "pending",
+            nextSafeAction: error.nextSafeAction,
+          };
+        }
+        throw error;
+      }
     }
 
     const firstAttempt = executeIntent(intent, true);
     firstAttempt.attempt = 1;
     if (firstAttempt.ok) {
       if (intent.requiresWrite && fingerprint) {
-        await markWriteIntentExecuted({
-          fingerprint,
-          remoteOrderId: parseRemoteOrderId(firstAttempt.stdout),
-        });
+        try {
+          await markWriteIntentExecuted({
+            fingerprint,
+            remoteOrderId: parseRemoteOrderId(firstAttempt.stdout),
+          });
+        } catch (error) {
+          if (!(error instanceof IdempotencyLockError)) {
+            throw error;
+          }
+        }
       }
       results.push(firstAttempt);
       finalResults.push(firstAttempt);
@@ -883,10 +940,16 @@ async function executeApplyWithIdempotency(
     );
 
     if (intent.requiresWrite && fingerprint) {
-      await markWriteIntentAmbiguous({
-        fingerprint,
-        lastError: normalizeFailureMessage(firstAttempt),
-      });
+      try {
+        await markWriteIntentAmbiguous({
+          fingerprint,
+          lastError: normalizeFailureMessage(firstAttempt),
+        });
+      } catch (error) {
+        if (!(error instanceof IdempotencyLockError)) {
+          throw error;
+        }
+      }
     }
 
     if (category === "retryable" && intent.safeToRetry) {
@@ -920,12 +983,14 @@ async function executeApplyWithIdempotency(
     break;
   }
 
+  const ledger = await loadIdempotencyLedger();
   return {
     results,
     errors,
     finalResults,
     idempotencyChecked: true,
     idempotentHitCount,
+    idempotencyLedgerSeq: Math.max(ledger.nextSeq - 1, 0),
   };
 }
 
