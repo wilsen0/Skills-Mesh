@@ -24,6 +24,9 @@ export type ArtifactKey =
   | "policy.plan-decision"
   | "execution.intent-bundle"
   | "execution.apply-decision"
+  | "approval.ticket"
+  | "execution.reconciliation"
+  | "report.operator-summary"
   | "diagnostics.probes"
   | "diagnostics.readiness"
   | "operations.rehearsal-plan"
@@ -169,6 +172,7 @@ export interface OkxCommandIntent {
   intentId: string;
   stepIndex: number;
   safeToRetry: boolean;
+  clientOrderRef?: string;
   command: string;
   args: string[];
   module: string;
@@ -182,8 +186,63 @@ export interface CommandPreviewEntry {
   module: string;
   requiresWrite: boolean;
   safeToRetry: boolean;
+  clientOrderRef?: string;
   reason: string;
   command: string;
+}
+
+export interface ApprovalTicket {
+  ticketId: string;
+  runId: string;
+  proposal: string;
+  plane: ExecutionPlane;
+  approvedBy: string;
+  reason: string;
+  approvedAt: string;
+  policyOutcome: PolicyDecision["outcome"];
+  evidence: string[];
+}
+
+export interface IdempotencyLedgerEntry {
+  fingerprint: string;
+  intentId: string;
+  runId: string;
+  proposal: string;
+  plane: ExecutionPlane;
+  module: string;
+  requiresWrite: boolean;
+  clientOrderRef?: string;
+  command: string;
+  status: "pending" | "executed" | "ambiguous";
+  remoteOrderId?: string;
+  createdAt: string;
+  updatedAt: string;
+  lastError?: string;
+}
+
+export interface IdempotencyLedger {
+  version: 2;
+  updatedAt: string;
+  entries: Record<string, IdempotencyLedgerEntry>;
+}
+
+export interface ReconciliationItem {
+  intentId: string;
+  module: string;
+  fingerprint: string;
+  clientOrderRef?: string;
+  status: "matched" | "ambiguous" | "failed";
+  remoteOrderId?: string;
+  reason: string;
+  evidence: string[];
+}
+
+export interface ReconciliationReport {
+  runId: string;
+  reconciledAt: string;
+  status: "matched" | "ambiguous" | "failed";
+  items: ReconciliationItem[];
+  nextActions: string[];
 }
 
 export interface SkillManifest {
@@ -364,6 +423,9 @@ export interface ExecutionRecord {
   approvalProvided: boolean;
   status: RunStatus;
   results: ExecutionResult[];
+  approvalTicketId?: string;
+  idempotencyChecked?: boolean;
+  reconciliationState?: "none" | "pending" | "matched" | "ambiguous" | "failed";
   blockedReason?: string;
 }
 

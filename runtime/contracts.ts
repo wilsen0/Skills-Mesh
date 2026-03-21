@@ -20,6 +20,9 @@ const ARTIFACT_KEYS: ArtifactKey[] = [
   "policy.plan-decision",
   "execution.intent-bundle",
   "execution.apply-decision",
+  "approval.ticket",
+  "execution.reconciliation",
+  "report.operator-summary",
   "diagnostics.probes",
   "diagnostics.readiness",
   "operations.rehearsal-plan",
@@ -177,6 +180,48 @@ export function validateArtifactData(key: ArtifactKey, data: unknown): void {
     }
     if ("results" in record) {
       invariant(Array.isArray(record.results), `Artifact '${key}.results' must be an array.`);
+    }
+    return;
+  }
+
+  if (key === "approval.ticket") {
+    const record = asObject(data);
+    invariant(record, `Artifact '${key}' must be an object.`);
+    if ("ticketId" in record) {
+      invariant(hasString(record.ticketId), `Artifact '${key}.ticketId' must be a string.`);
+    }
+    if ("approvedBy" in record) {
+      invariant(hasString(record.approvedBy), `Artifact '${key}.approvedBy' must be a string.`);
+    }
+    if ("proposal" in record) {
+      invariant(hasString(record.proposal), `Artifact '${key}.proposal' must be a string.`);
+    }
+    return;
+  }
+
+  if (key === "execution.reconciliation") {
+    const record = asObject(data);
+    invariant(record, `Artifact '${key}' must be an object.`);
+    if ("status" in record) {
+      invariant(
+        ["matched", "ambiguous", "failed"].includes(String(record.status)),
+        `Artifact '${key}.status' is invalid.`,
+      );
+    }
+    if ("items" in record) {
+      invariant(Array.isArray(record.items), `Artifact '${key}.items' must be an array.`);
+    }
+    return;
+  }
+
+  if (key === "report.operator-summary") {
+    const record = asObject(data);
+    invariant(record, `Artifact '${key}' must be an object.`);
+    if ("isExecutable" in record) {
+      invariant(typeof record.isExecutable === "boolean", `Artifact '${key}.isExecutable' must be a boolean.`);
+    }
+    if ("nextSafeAction" in record) {
+      invariant(hasString(record.nextSafeAction), `Artifact '${key}.nextSafeAction' must be a string.`);
     }
     return;
   }
