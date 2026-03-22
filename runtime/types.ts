@@ -27,8 +27,10 @@ export type ArtifactKey =
   | "execution.idempotency-check"
   | "approval.ticket"
   | "execution.reconciliation"
+  | "operations.receipt-verification"
   | "report.operator-summary"
   | "report.operator-brief"
+  | "report.business-brief"
   | "mesh.skill-certification"
   | "mesh.route-proof"
   | "diagnostics.probes"
@@ -309,6 +311,16 @@ export interface ReconciliationReport {
   nextActions: string[];
 }
 
+export interface ReceiptVerification {
+  status: "verified" | "pending" | "ambiguous" | "failed" | "not_applicable";
+  plane: ExecutionPlane;
+  executionId?: string;
+  checkedAt: string;
+  matchedBy: "client_order_ref" | "fallback_window" | "none";
+  evidence: string[];
+  nextAction: string;
+}
+
 export interface OperatorSummaryV3 {
   runId: string;
   plane: ExecutionPlane;
@@ -345,6 +357,23 @@ export interface OperatorBrief {
   nextSafeAction: string;
 }
 
+export interface BusinessBrief {
+  goalSummary: string;
+  recommendedAction: string;
+  canActNow: boolean;
+  currentBlocker: string;
+  riskBudgetSummary: string;
+  nextSafeAction: string;
+}
+
+export interface ManifestDigestProof {
+  registryDigest: string;
+  skillDigests: Record<string, string>;
+  matchedCurrentRegistry: boolean;
+  driftedSkills: string[];
+  checkedAt: string;
+}
+
 export interface RouteProofMinimality {
   passed: boolean;
   redundantSkills: string[];
@@ -377,6 +406,7 @@ export interface RouteProof {
   minimality: RouteProofMinimality;
   steps: RouteProofStep[];
   resumePoints: RouteResumePoint[];
+  contractDrift?: boolean;
   generatedAt: string;
 }
 
@@ -813,7 +843,46 @@ export interface RunRecord {
   operatorState?: "stable" | "attention" | "blocked";
   lastSafeAction?: string;
   requiresHumanAction?: boolean;
+  contractDrift?: boolean;
   notes: string[];
   createdAt: string;
   updatedAt: string;
+}
+
+export interface PortableRunBundle {
+  bundleVersion: 1;
+  runId: string;
+  runtimeVersion: string;
+  exportedAt: string;
+  goal: string;
+  plane: ExecutionPlane;
+  status: RunStatus;
+  routeKind: RunRecord["routeKind"];
+  route: string[];
+  artifactSnapshot: ArtifactSnapshot;
+  operatorBrief: OperatorBrief;
+  businessBrief: BusinessBrief;
+  operatorSummary: OperatorSummaryV3;
+  manifestProof: ManifestDigestProof;
+  meshRouteProof?: RouteProof;
+  skillCertification?: SkillCertificationReport | null;
+  goalIntake?: GoalIntake | null;
+  capabilitySnapshot?: CapabilitySnapshot;
+  diagnosis?: EnvironmentDiagnosis | null;
+  routeSummary?: RouteSummary | null;
+  proposalTable?: SkillProposal[];
+  selectedProposal?: string | null;
+  policyDecision?: PolicyDecision | null;
+  approvalTicket?: ApprovalTicket | null;
+  idempotencySummary?: {
+    checked: boolean;
+    hitCount: number;
+    reconciliationState: ExecutionRecord["reconciliationState"] | "none";
+  };
+  reconciliationSummary?: ReconciliationReport | null;
+  executionReceipts?: ExecutionRecord[];
+  latestExecution?: ExecutionRecord | null;
+  errors?: RunErrorRecord[];
+  notes?: string[];
+  nextActions?: string[];
 }

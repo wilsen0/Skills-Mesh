@@ -9,8 +9,8 @@ writes: false
 always_on: false
 triggers: [operator, summary, replay, export]
 entrypoint: ./run.js
-consumes: [approval.ticket, execution.idempotency-check, execution.reconciliation]
-produces: [report.operator-summary, report.operator-brief]
+consumes: [goal.intake, approval.ticket, execution.idempotency-check, execution.reconciliation, operations.receipt-verification]
+produces: [report.operator-summary, report.operator-brief, report.business-brief]
 preferred_handoffs: [replay]
 repeatable: true
 artifact_version: 3
@@ -20,11 +20,11 @@ determinism: high
 proof_class: portable
 proof_goal: "portable proof operator summarizer"
 proof_fixture: ./proof/input.artifacts.json
-proof_target_outputs: [report.operator-summary, report.operator-brief]
+proof_target_outputs: [report.operator-summary, report.operator-brief, report.business-brief]
 standalone_command: "trademesh skills run operator-summarizer \"<goal>\" --plane demo"
 standalone_route: [operator-summarizer]
 standalone_inputs: [goal]
-standalone_outputs: [report.operator-summary, report.operator-brief]
+standalone_outputs: [report.operator-summary, report.operator-brief, report.business-brief]
 required_capabilities: []
 ---
 

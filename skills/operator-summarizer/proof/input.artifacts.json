@@ -1,4 +1,29 @@
 {
+  "goal.intake": {
+    "key": "goal.intake",
+    "version": 3,
+    "producer": "proof-fixture",
+    "createdAt": "2026-03-22T00:00:00.000Z",
+    "ruleRefs": [],
+    "doctrineRefs": [],
+    "data": {
+      "rawGoal": "portable proof operator summary",
+      "normalizedGoal": "portable proof operator summary",
+      "symbols": ["BTC"],
+      "targetDrawdownPct": 4,
+      "hedgeIntent": "protect_downside",
+      "timeHorizon": "swing",
+      "planePreference": "demo",
+      "executePreference": "dry_run",
+      "sources": {
+        "symbols": "default",
+        "targetDrawdownPct": "default",
+        "hedgeIntent": "default",
+        "timeHorizon": "default"
+      },
+      "warnings": []
+    }
+  },
   "approval.ticket": {
     "key": "approval.ticket",
     "version": 3,
@@ -47,6 +72,23 @@
       "status": "matched",
       "items": [],
       "attempts": []
+    }
+  },
+  "operations.receipt-verification": {
+    "key": "operations.receipt-verification",
+    "version": 3,
+    "producer": "proof-fixture",
+    "createdAt": "2026-03-22T00:00:00.000Z",
+    "ruleRefs": [],
+    "doctrineRefs": [],
+    "data": {
+      "status": "verified",
+      "plane": "demo",
+      "executionId": "run_proof:exec:1",
+      "checkedAt": "2026-03-22T00:00:00.000Z",
+      "matchedBy": "client_order_ref",
+      "evidence": ["portable proof verification"],
+      "nextAction": "node dist/bin/trademesh.js export run_proof"
     }
   }
 }

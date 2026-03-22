@@ -3,6 +3,7 @@ import { join, resolve } from "node:path";
 import { executeIntent, inspectOkxEnvironment } from "./okx.js";
 import { createArtifactStore, putArtifact } from "./artifacts.js";
 import { currentArtifactVersion } from "./artifact-schema.js";
+import { buildBusinessBrief } from "./business-brief.js";
 import { runExplicitRoute, runPlanningGraph, type ExplicitRouteSkippedStep } from "./graph-runtime.js";
 import { formatDrawdownPct } from "./goal-intake.js";
 import {
@@ -12,10 +13,12 @@ import {
   markWriteIntentAmbiguous,
   markWriteIntentExecuted,
 } from "./idempotency.js";
+import { buildManifestDigestProof, compareManifestDigestProof } from "./manifest-digest.js";
 import { buildSkillGraphView, inspectSkillSurface, type SkillGraphView, type SkillRuntimeSurface } from "./mesh.js";
 import { buildOperatorBrief } from "./operator-brief.js";
 import { getProjectPaths } from "./paths.js";
 import { evaluatePolicy } from "./policy.js";
+import { matchIntentAgainstHistory } from "./reconciliation.js";
 import { loadSkillHandler, loadSkillRegistry } from "./registry.js";
 import { seedReasons } from "./router.js";
 import { runDoctor, type DoctorReport } from "./doctor.js";
@@ -27,11 +30,13 @@ import {
   saveArtifactSnapshot,
   saveRun,
 } from "./trace.js";
+import { validatePortableRunBundle } from "./contracts.js";
 import type {
   ArtifactKey,
   ArtifactSnapshot,
   ArtifactStore,
   ApprovalTicket,
+  BusinessBrief,
   CapabilitySnapshot,
   CommandPreviewEntry,
   EnvironmentDiagnosis,
@@ -41,11 +46,14 @@ import type {
   ExecutionResult,
   GoalIntake,
   GoalIntakeOverrides,
+  ManifestDigestProof,
   OperatorBrief,
   OperatorSummaryV3,
   OkxCommandIntent,
   OrderPlanStep,
   PolicyDecision,
+  PortableRunBundle,
+  ReceiptVerification,
   ReconciliationReport,
   RouteProof,
   RunErrorRecord,
@@ -70,6 +78,8 @@ interface StandaloneOptions {
   plane: ExecutionPlane;
   goalOverrides?: GoalIntakeOverrides;
   inputArtifacts?: ArtifactSnapshot;
+  bundle?: PortableRunBundle;
+  allowContractDrift?: boolean;
   skipSatisfied?: boolean;
   runtimeInputExtras?: Record<string, unknown>;
   manifests?: SkillManifest[];
@@ -85,6 +95,7 @@ interface ApplyOptions {
   maxOrderUsd?: number;
   maxTotalUsd?: number;
   execute?: boolean;
+  verifyReceipt?: boolean;
 }
 
 interface ReplayOptions {
@@ -113,6 +124,7 @@ interface ReconcileOptions {
 interface RehearseOptions {
   execute?: boolean;
   approve?: boolean;
+  verifyReceipt?: boolean;
 }
 
 interface ExecutionBundle {
@@ -171,6 +183,12 @@ export interface SkillsCertificationResult {
     ruleRefs: string[];
     doctrineRefs: string[];
   };
+  summary: string;
+}
+
+export interface BundleReplayResult {
+  bundle: PortableRunBundle;
+  contractProof: ManifestDigestProof;
   summary: string;
 }
 
@@ -251,8 +269,67 @@ function hasExportBundle(runId: string): boolean {
   return existsSync(paths.bundlePath) && existsSync(paths.reportPath) && existsSync(paths.operatorSummaryPath);
 }
 
+async function runtimeVersion(): Promise<string> {
+  const { projectRoot } = getProjectPaths();
+  const raw = await fs.readFile(join(projectRoot, "package.json"), "utf8");
+  const parsed = JSON.parse(raw) as { version?: unknown };
+  return typeof parsed.version === "string" && parsed.version.trim().length > 0 ? parsed.version : "0.1.0";
+}
+
+async function readPortableBundle(bundlePath: string): Promise<PortableRunBundle> {
+  const raw = await fs.readFile(resolve(bundlePath), "utf8");
+  return validatePortableRunBundle(JSON.parse(raw) as unknown);
+}
+
+async function currentManifestProof(manifests?: SkillManifest[]): Promise<ManifestDigestProof> {
+  return buildManifestDigestProof(manifests ?? await loadSkillRegistry());
+}
+
 function goalIntakeFromArtifacts(artifacts: ArtifactStore): GoalIntake | undefined {
   return artifacts.get<GoalIntake>("goal.intake")?.data;
+}
+
+async function referencedRunArtifacts(manifest: SkillManifest, goal: string): Promise<ArtifactSnapshot | undefined> {
+  if (!manifest.standaloneInputs.includes("run-id")) {
+    return undefined;
+  }
+  try {
+    return await loadArtifactSnapshot(goal);
+  } catch {
+    return undefined;
+  }
+}
+
+async function standaloneRuntimeInputBase(
+  manifest: SkillManifest,
+  goal: string,
+  bundle: PortableRunBundle | undefined,
+): Promise<Record<string, unknown>> {
+  const runtimeInput: Record<string, unknown> = {};
+  if (manifest.name === "replay") {
+    runtimeInput.replaySourceRunId = goal;
+  }
+
+  if (manifest.standaloneInputs.includes("run-id")) {
+    runtimeInput.replaySourceRunId ??= goal;
+    if (bundle?.latestExecution) {
+      runtimeInput.execution = bundle.latestExecution;
+      runtimeInput.latestExecution = bundle.latestExecution;
+    } else {
+      try {
+        const referenced = await loadNormalizedRun(goal);
+        runtimeInput.execution = referenced.executions.at(-1);
+        runtimeInput.latestExecution = referenced.executions.at(-1);
+      } catch {
+        // Keep standalone runtime input minimal when no referenced run is available.
+      }
+    }
+    runtimeInput.reconcileSource ??= "auto";
+    runtimeInput.reconcileWindowMin ??= 120;
+    runtimeInput.attemptNumber ??= 1;
+  }
+
+  return runtimeInput;
 }
 
 function previewEntryFromIntent(intent: OkxCommandIntent): CommandPreviewEntry {
@@ -684,6 +761,7 @@ async function loadNormalizedRun(runId: string): Promise<RunRecord> {
     selectedProposal: loaded.selectedProposal,
     routeSummary: loaded.routeSummary,
     judgeSummary: loaded.judgeSummary,
+    contractDrift: loaded.contractDrift,
     policyDecision: loaded.policyDecision,
     legacyProposals: loaded.proposals ?? [],
     capabilitySnapshot,
@@ -828,6 +906,41 @@ interface ExecutionWithRecovery {
   blockedByIdempotency?: string;
   blockedReconciliationState?: "pending" | "ambiguous";
   nextSafeAction?: string;
+}
+
+function verificationReconciliationState(
+  verification: ReceiptVerification,
+): ExecutionRecord["reconciliationState"] {
+  if (verification.status === "verified") {
+    return "matched";
+  }
+  if (verification.status === "ambiguous") {
+    return "ambiguous";
+  }
+  if (verification.status === "failed") {
+    return "failed";
+  }
+  if (verification.status === "pending") {
+    return "pending";
+  }
+  return "none";
+}
+
+function applyReceiptVerificationToExecution(
+  execution: ExecutionRecord,
+  verification: ReceiptVerification,
+): ExecutionRecord {
+  const reconciliationState = verificationReconciliationState(verification);
+  const reconciliationRequired =
+    reconciliationState === "pending" || reconciliationState === "ambiguous" || reconciliationState === "failed";
+  return {
+    ...execution,
+    reconciliationState,
+    reconciliationRequired,
+    blockedReason: reconciliationRequired
+      ? verification.nextAction
+      : execution.blockedReason,
+  };
 }
 
 function classifyExecutionFailure(result: ExecutionResult): ExecutionErrorCategory {
@@ -1292,6 +1405,7 @@ export async function createPlan(goal: string, options: PlanOptions): Promise<Ru
     artifacts,
     sharedState,
     targetOutputs: ["planning.proposals", "policy.plan-decision"],
+    contractDrift: false,
   });
   const record = hydrateRecord({
     ...plannedRecord,
@@ -1329,6 +1443,7 @@ async function attachRouteProof(params: {
   sharedState: Record<string, unknown>;
   targetOutputs: ArtifactKey[];
   skippedSteps?: ExplicitRouteSkippedStep[];
+  contractDrift?: boolean;
 }): Promise<SkillOutput[]> {
   const manifest = params.manifests.find((entry) => entry.name === "mesh-prover");
   if (!manifest) {
@@ -1349,6 +1464,7 @@ async function attachRouteProof(params: {
       route: params.route,
       targetOutputs: params.targetOutputs,
       skippedSteps: params.skippedSteps ?? [],
+      contractDrift: params.contractDrift === true,
     },
     sharedState: params.sharedState,
   });
@@ -1369,7 +1485,18 @@ async function executeStandaloneRouteInternal(
   const runId = await createRunId();
   const capabilitySnapshot = await inspectOkxEnvironment();
   const sharedState: Record<string, unknown> = {};
-  const artifacts = createArtifactStore(options.inputArtifacts, sharedState);
+  const bundle = options.bundle;
+  const comparison = bundle ? compareManifestDigestProof(bundle.manifestProof, manifests) : undefined;
+  if (bundle && comparison && !comparison.matchedCurrentRegistry && options.allowContractDrift !== true) {
+    throw new Error(
+      `Portable bundle contract drift detected for: ${comparison.driftedSkills.join(", ")}. Re-run with --allow-contract-drift to override.`,
+    );
+  }
+  const initialArtifacts = options.inputArtifacts ??
+    bundle?.artifactSnapshot ??
+    await referencedRunArtifacts(manifest, goal);
+  const runtimeInputBase = await standaloneRuntimeInputBase(manifest, goal, bundle);
+  const artifacts = createArtifactStore(initialArtifacts, sharedState);
   ensureSkillCertificationArtifact(manifests, artifacts, "standalone-runtime");
   const graph = await runExplicitRoute({
     route: manifest.standaloneRoute,
@@ -1385,7 +1512,7 @@ async function executeStandaloneRouteInternal(
       runtimeInput: {
         capabilitySnapshot,
         goalOverrides: options.goalOverrides ?? {},
-        replaySourceRunId: skillName === "replay" ? goal : undefined,
+        ...runtimeInputBase,
         ...(options.runtimeInputExtras ?? {}),
       },
       sharedState,
@@ -1419,8 +1546,12 @@ async function executeStandaloneRouteInternal(
       `Standalone route executed for skill '${skillName}'.`,
       `Standalone route: ${route.join(" -> ")}`,
       `Selected plane: ${options.plane}`,
+      ...(comparison && !comparison.matchedCurrentRegistry
+        ? [`Contract drift override enabled for: ${comparison.driftedSkills.join(", ")}`]
+        : []),
       ...(options.skipSatisfied ? ["Resume mode: upstream steps were skipped when outputs were already satisfied."] : []),
     ],
+    contractDrift: comparison?.matchedCurrentRegistry === false ? true : undefined,
     createdAt: now(),
     updatedAt: now(),
   });
@@ -1455,6 +1586,7 @@ export async function runSkillStandalone(
     sharedState: executed.sharedState,
     targetOutputs: [...executed.manifest.standaloneOutputs],
     skippedSteps: executed.graph.skippedSteps,
+    contractDrift: executed.record.contractDrift === true,
   });
   const record = hydrateRecord({
     ...executed.record,
@@ -1467,13 +1599,54 @@ export async function runSkillStandalone(
   return record;
 }
 
+async function runReceiptVerification(params: {
+  manifest: SkillManifest;
+  runId: string;
+  goal: string;
+  plane: ExecutionPlane;
+  manifests: SkillManifest[];
+  trace: SkillOutput[];
+  artifacts: ArtifactStore;
+  sharedState: Record<string, unknown>;
+  execution: ExecutionRecord;
+  windowMin?: number;
+}): Promise<{ output: SkillOutput; verification: ReceiptVerification; execution: ExecutionRecord }> {
+  const output = await executeSkill(params.manifest, {
+    runId: params.runId,
+    goal: params.goal,
+    plane: params.plane,
+    manifests: params.manifests,
+    trace: params.trace,
+    artifacts: params.artifacts,
+    runtimeInput: {
+      latestExecution: params.execution,
+      execution: params.execution,
+      reconcileWindowMin: params.windowMin ?? 120,
+    },
+    sharedState: params.sharedState,
+  });
+  const verification = params.artifacts.get<ReceiptVerification>("operations.receipt-verification")?.data;
+  if (!verification) {
+    throw new Error("receipt-verifier did not produce operations.receipt-verification.");
+  }
+  return {
+    output,
+    verification,
+    execution: applyReceiptVerificationToExecution(params.execution, verification),
+  };
+}
+
 export async function applyRun(runId: string, options: ApplyOptions): Promise<RunRecord> {
   const baseRecord = await loadNormalizedRun(runId);
+  if (options.verifyReceipt && !options.execute) {
+    throw new Error("--verify-receipt requires --execute.");
+  }
   const manifests = await loadSkillRegistry();
   const executorManifest = manifests.find((manifest) => manifest.name === "official-executor");
   const approvalManifest = manifests.find((manifest) => manifest.name === "approval-gate");
   const liveGuardManifest = manifests.find((manifest) => manifest.name === "live-guard");
   const idempotencyGateManifest = manifests.find((manifest) => manifest.name === "idempotency-gate");
+  const receiptVerifierManifest = manifests.find((manifest) => manifest.name === "receipt-verifier");
   const operatorManifest = manifests.find((manifest) => manifest.name === "operator-summarizer");
   if (!executorManifest) {
     throw new Error("No official-executor skill installed");
@@ -1492,6 +1665,9 @@ export async function applyRun(runId: string, options: ApplyOptions): Promise<Ru
   }
 
   const targetPlane = options.plane ?? baseRecord.plane;
+  if (options.verifyReceipt && targetPlane === "live") {
+    throw new Error("verify-receipt is demo-only in M2.8.");
+  }
   const artifactSnapshot = await loadArtifactSnapshot(runId);
   if (Object.keys(artifactSnapshot).length === 0) {
     throw new Error(
@@ -1748,8 +1924,30 @@ export async function applyRun(runId: string, options: ApplyOptions): Promise<Ru
     results: executionOutcome.results,
     blockedReason: finalBlockedReason,
   };
+  if (options.verifyReceipt && options.execute && !receiptVerifierManifest) {
+    throw new Error("No receipt-verifier skill installed. Verified demo execute requires receipt verification.");
+  }
 
-  const nextActionForOperator = executionOutcome.nextSafeAction ??
+  let receiptVerification: ReceiptVerification | undefined;
+  if (options.verifyReceipt && options.execute && receiptVerifierManifest) {
+    const receiptVerificationResult = await runReceiptVerification({
+      manifest: receiptVerifierManifest,
+      runId: baseRecord.id,
+      goal: baseRecord.goal,
+      plane: targetPlane,
+      manifests,
+      trace: applyTrace,
+      artifacts,
+      sharedState,
+      execution,
+    });
+    applyTrace.push(receiptVerificationResult.output);
+    receiptVerification = receiptVerificationResult.verification;
+    Object.assign(execution, receiptVerificationResult.execution);
+  }
+
+  const nextActionForOperator = receiptVerification?.nextAction ??
+    executionOutcome.nextSafeAction ??
     (idempotencyCheck?.status === "blocked_reconcile_required"
       ? (idempotencyCheck.nextAction ?? `node dist/bin/trademesh.js reconcile ${baseRecord.id}`)
       : finalBlockedReason?.toLowerCase().includes("reconcile")
@@ -1765,6 +1963,7 @@ export async function applyRun(runId: string, options: ApplyOptions): Promise<Ru
     runtimeInput: {
       runStatus: status,
       latestExecution: execution,
+      selectedProposal: proposal.name,
       nextSafeAction: nextActionForOperator,
     },
     sharedState,
@@ -1777,6 +1976,7 @@ export async function applyRun(runId: string, options: ApplyOptions): Promise<Ru
     "live-guard",
     "official-executor",
     "idempotency-gate",
+    ...(options.verifyReceipt && options.execute ? ["receipt-verifier"] : []),
     "operator-summarizer",
   ];
   const proofTrace = await attachRouteProof({
@@ -1789,7 +1989,13 @@ export async function applyRun(runId: string, options: ApplyOptions): Promise<Ru
     trace: applyTrace,
     artifacts,
     sharedState,
-    targetOutputs: ["execution.intent-bundle", "execution.apply-decision", "report.operator-summary"],
+    targetOutputs: [
+      "execution.intent-bundle",
+      "execution.apply-decision",
+      ...(options.verifyReceipt && options.execute ? ["operations.receipt-verification" as const] : []),
+      "report.operator-summary",
+    ],
+    contractDrift: baseRecord.contractDrift === true,
   });
 
   const nextRecord = hydrateRecord({
@@ -1812,6 +2018,7 @@ export async function applyRun(runId: string, options: ApplyOptions): Promise<Ru
       : undefined,
     lastSafeAction: operatorSummary?.nextSafeAction,
     requiresHumanAction: operatorSummary?.requiresHumanAction,
+    contractDrift: baseRecord.contractDrift,
     notes: [
       ...baseRecord.notes,
       `Apply ${status}: ${effectiveDecision.reasons.join(" | ")}`,
@@ -1820,6 +2027,7 @@ export async function applyRun(runId: string, options: ApplyOptions): Promise<Ru
         : []),
       ...(liveGuard?.status === "blocked" ? [`Live guard blocked: ${liveGuardReasons.join(" | ")}`] : []),
       ...(executionOutcome.nextSafeAction ? [`Next safe action: ${executionOutcome.nextSafeAction}`] : []),
+      ...(receiptVerification ? [`Receipt verification: ${receiptVerification.status}`] : []),
       ...(executionOutcome.errors.length > 0 ? [`Execution errors recorded: ${executionOutcome.errors.length}`] : []),
     ],
     updatedAt: now(),
@@ -1959,6 +2167,7 @@ export async function reconcileRun(runId: string, options: ReconcileOptions = {}
     runtimeInput: {
       runStatus: nextStatus,
       latestExecution: reconciledExecutions.at(-1),
+      selectedProposal: latestExecution.proposal,
       nextSafeAction: report.status === "matched"
         ? `node dist/bin/trademesh.js export ${record.id}`
         : reconcileCommand,
@@ -1976,6 +2185,7 @@ export async function reconcileRun(runId: string, options: ReconcileOptions = {}
     artifacts,
     sharedState,
     targetOutputs: ["execution.reconciliation", "report.operator-summary"],
+    contractDrift: record.contractDrift === true,
   });
   const operatorSummary = artifacts.get<OperatorSummaryV3>("report.operator-summary")?.data;
   const attemptsRan = report.attempts?.length ?? reconcileOutputs.length;
@@ -2044,6 +2254,7 @@ export async function replayRun(runId: string, options: ReplayOptions = {}): Pro
       runtimeInput: {
         runStatus: record.status,
         latestExecution: record.executions.at(-1),
+        selectedProposal: record.selectedProposal ?? preferredProposalName(record.proposals),
         nextSafeAction: `node dist/bin/trademesh.js export ${record.id}`,
       },
       sharedState,
@@ -2061,6 +2272,7 @@ export async function replayRun(runId: string, options: ReplayOptions = {}): Pro
     artifacts,
     sharedState,
     targetOutputs: ["report.operator-summary"],
+    contractDrift: record.contractDrift === true,
   });
   const operatorSummary = artifacts.get<OperatorSummaryV3>("report.operator-summary")?.data;
   const nextRecord = hydrateRecord({
@@ -2084,13 +2296,60 @@ export async function replayRun(runId: string, options: ReplayOptions = {}): Pro
   return nextRecord;
 }
 
+function formatBundleReplay(bundle: PortableRunBundle, contractProof: ManifestDigestProof): string {
+  const meshProof = bundle.meshRouteProof ?? null;
+  return [
+    "TradeMesh CLI Skill Mesh 2.0",
+    "Replay Timeline",
+    `Run: ${bundle.runId}`,
+    `Plane: ${bundle.plane} | Status: ${bundle.status} | Goal: ${bundle.goal}`,
+    "",
+    block("Business Brief", businessBriefLines(bundle.businessBrief)),
+    block("Operator Brief", [
+      `isExecutable: ${bundle.operatorBrief.isExecutable ? "yes" : "no"}`,
+      `currentBlocker: ${bundle.operatorBrief.currentBlocker}`,
+      `approvalState: ${bundle.operatorBrief.approvalState}`,
+      `idempotencyState: ${bundle.operatorBrief.idempotencyState}`,
+      `reconciliationState: ${bundle.operatorBrief.reconciliationState}`,
+      `nextSafeAction: ${bundle.operatorBrief.nextSafeAction}`,
+    ]),
+    block("Mesh Proof", routeProofLines(meshProof)),
+    block("Contract Proof", contractProofLines(contractProof)),
+    block("Bundle Snapshot", [
+      `bundleVersion: ${bundle.bundleVersion}`,
+      `runtimeVersion: ${bundle.runtimeVersion}`,
+      `exportedAt: ${bundle.exportedAt}`,
+      `artifacts: ${Object.keys(bundle.artifactSnapshot).length}`,
+      `route: ${bundle.route.join(" -> ")}`,
+    ]),
+  ].join("\n");
+}
+
+export async function replayBundle(bundlePath: string): Promise<BundleReplayResult> {
+  const bundle = await readPortableBundle(bundlePath);
+  const manifests = await loadSkillRegistry();
+  const contractProof = compareManifestDigestProof(bundle.manifestProof, manifests);
+  return {
+    bundle,
+    contractProof,
+    summary: formatBundleReplay(bundle, contractProof),
+  };
+}
+
 export async function rehearseDemo(options: RehearseOptions = {}): Promise<RunRecord> {
+  if (options.verifyReceipt && !options.execute) {
+    throw new Error("--verify-receipt requires --execute.");
+  }
   const manifests = await loadSkillRegistry();
   const runId = await createRunId();
   const capabilitySnapshot = await inspectOkxEnvironment();
   const operatorManifest = manifests.find((manifest) => manifest.name === "operator-summarizer");
+  const receiptVerifierManifest = manifests.find((manifest) => manifest.name === "receipt-verifier");
   if (!capabilitySnapshot.demoProfileLikelyConfigured) {
     throw new Error("Demo profile is required for rehearsal. Run `trademesh doctor --probe active` first.");
+  }
+  if (options.verifyReceipt && !receiptVerifierManifest) {
+    throw new Error("No receipt-verifier skill installed. Verified demo rehearsal requires receipt verification.");
   }
 
   const sharedState: Record<string, unknown> = {};
@@ -2205,6 +2464,23 @@ export async function rehearseDemo(options: RehearseOptions = {}): Promise<RunRe
     doctrineRefs: decision.doctrineRefs ?? [],
   });
   let fullTrace = [...graph.trace];
+  let receiptVerification: ReceiptVerification | undefined;
+  if (options.verifyReceipt && options.execute && receiptVerifierManifest) {
+    const receiptVerificationResult = await runReceiptVerification({
+      manifest: receiptVerifierManifest,
+      runId,
+      goal: "rehearse demo write path",
+      plane: "demo",
+      manifests,
+      trace: fullTrace,
+      artifacts,
+      sharedState,
+      execution,
+    });
+    fullTrace = [...fullTrace, receiptVerificationResult.output];
+    receiptVerification = receiptVerificationResult.verification;
+    Object.assign(execution, receiptVerificationResult.execution);
+  }
   if (operatorManifest) {
     const operatorOutput = await executeSkill(operatorManifest, {
       runId,
@@ -2216,7 +2492,8 @@ export async function rehearseDemo(options: RehearseOptions = {}): Promise<RunRe
       runtimeInput: {
         runStatus: status,
         latestExecution: execution,
-        nextSafeAction: `node dist/bin/trademesh.js export ${runId}`,
+        selectedProposal: proposal.name,
+        nextSafeAction: receiptVerification?.nextAction ?? `node dist/bin/trademesh.js export ${runId}`,
       },
       sharedState,
     });
@@ -2228,13 +2505,23 @@ export async function rehearseDemo(options: RehearseOptions = {}): Promise<RunRe
     goal: "rehearse demo write path",
     plane: "demo",
     routeKind: "operations",
-    route: operatorManifest ? [...graph.route, "operator-summarizer"] : [...graph.route],
+    route: operatorManifest
+      ? [...graph.route, ...(options.verifyReceipt && options.execute ? ["receipt-verifier"] : []), "operator-summarizer"]
+      : [...graph.route, ...(options.verifyReceipt && options.execute ? ["receipt-verifier"] : [])],
     trace: fullTrace,
     artifacts,
     sharedState,
-    targetOutputs: ["operations.rehearsal-plan", "operations.rehearsal-receipt", "report.operator-summary"],
+    targetOutputs: [
+      "operations.rehearsal-plan",
+      "operations.rehearsal-receipt",
+      ...(options.verifyReceipt && options.execute ? ["operations.receipt-verification" as const] : []),
+      "report.operator-summary",
+    ],
+    contractDrift: false,
   });
-  const rehearsalRoute = operatorManifest ? [...graph.route, "operator-summarizer"] : [...graph.route];
+  const rehearsalRoute = operatorManifest
+    ? [...graph.route, ...(options.verifyReceipt && options.execute ? ["receipt-verifier"] : []), "operator-summarizer"]
+    : [...graph.route, ...(options.verifyReceipt && options.execute ? ["receipt-verifier"] : [])];
 
   const record = hydrateRecord({
     kind: "trademesh-run",
@@ -2256,6 +2543,7 @@ export async function rehearseDemo(options: RehearseOptions = {}): Promise<RunRe
       "Demo rehearsal route executed.",
       `Apply verdict: ${decision.outcome}`,
       `Execute requested: ${options.execute ? "yes" : "no"}`,
+      ...(receiptVerification ? [`Receipt verification: ${receiptVerification.status}`] : []),
     ],
     createdAt: now(),
     updatedAt: now(),
@@ -2417,6 +2705,17 @@ function goalIntakeLines(record: RunRecord): string[] {
   ];
 }
 
+function businessBriefLines(brief: BusinessBrief): string[] {
+  return [
+    `goalSummary: ${brief.goalSummary}`,
+    `recommendedAction: ${brief.recommendedAction}`,
+    `canActNow: ${brief.canActNow ? "yes" : "no"}`,
+    `currentBlocker: ${brief.currentBlocker}`,
+    `riskBudgetSummary: ${brief.riskBudgetSummary}`,
+    `nextSafeAction: ${brief.nextSafeAction}`,
+  ];
+}
+
 function policyLines(record: RunRecord): string[] {
   const policy = record.policyDecision;
   if (!policy) {
@@ -2442,6 +2741,10 @@ function latestSkillCertification(artifacts: ArtifactStore): SkillCertificationR
   return artifacts.get<SkillCertificationReport>("mesh.skill-certification")?.data ?? null;
 }
 
+function latestBusinessBrief(artifacts: ArtifactStore): BusinessBrief | null {
+  return artifacts.get<BusinessBrief>("report.business-brief")?.data ?? null;
+}
+
 function latestRouteProof(artifacts: ArtifactStore): RouteProof | null {
   return artifacts.get<RouteProof>("mesh.route-proof")?.data ?? null;
 }
@@ -2455,8 +2758,18 @@ function routeProofLines(proof: RouteProof | null): string[] {
   return [
     `proofPassed: ${proof.proofPassed ? "yes" : "no"}`,
     `minimality: ${proof.minimality.passed ? "passed" : "failed"} (${proof.minimality.reason})`,
+    `contractDrift: ${proof.contractDrift ? "yes" : "no"}`,
     `resumePoints: ${proof.resumePoints.length}`,
     ...(reruns.length > 0 ? reruns : ["rerunCommands: none"]),
+  ];
+}
+
+function contractProofLines(proof: ManifestDigestProof): string[] {
+  return [
+    `matchedCurrentRegistry: ${proof.matchedCurrentRegistry ? "yes" : "no"}`,
+    `registryDigest: ${proof.registryDigest}`,
+    `driftedSkills: ${proof.driftedSkills.length > 0 ? proof.driftedSkills.join(", ") : "none"}`,
+    `checkedAt: ${proof.checkedAt}`,
   ];
 }
 
@@ -2469,8 +2782,13 @@ function idempotentHitCount(execution: ExecutionRecord | undefined): number {
 
 function operatorNextAction(record: RunRecord, artifacts: ArtifactStore): string {
   const latestExecution = record.executions.at(-1);
+  const receiptVerification = artifacts.get<ReceiptVerification>("operations.receipt-verification")?.data ?? null;
   if (latestExecution?.status === "approval_required") {
     return `node dist/bin/trademesh.js apply ${record.id} --plane ${record.plane} --proposal ${latestExecution.proposal} --approve --approved-by <name> --execute`;
+  }
+
+  if (receiptVerification && receiptVerification.status !== "verified" && receiptVerification.status !== "not_applicable") {
+    return receiptVerification.nextAction;
   }
 
   if (latestExecution?.blockedReason?.toLowerCase().includes("reconcile")) {
@@ -2494,6 +2812,7 @@ function buildOperatorSummary(record: RunRecord, artifacts: ArtifactStore): Oper
   const latestExecution = record.executions.at(-1) ?? null;
   const approvalTicket = latestApprovalTicket(artifacts);
   const reconciliation = latestReconciliation(artifacts);
+  const receiptVerification = artifacts.get<ReceiptVerification>("operations.receipt-verification")?.data ?? null;
   const blockers: string[] = [];
   if (record.status === "blocked") {
     blockers.push("policy_blocked");
@@ -2504,10 +2823,21 @@ function buildOperatorSummary(record: RunRecord, artifacts: ArtifactStore): Oper
   if (latestExecution?.blockedReason && latestExecution.blockedReason.trim().length > 0) {
     blockers.push(latestExecution.blockedReason);
   }
+  if (receiptVerification && receiptVerification.status !== "verified" && receiptVerification.status !== "not_applicable") {
+    blockers.push(`receipt_verification_${receiptVerification.status}`);
+  }
   if (reconciliation && reconciliation.status !== "matched") {
     blockers.push(`reconciliation_${reconciliation.status}`);
   }
-  const reconciliationState = latestExecution?.reconciliationState ?? reconciliation?.status ?? "none";
+  const reconciliationState = receiptVerification?.status === "verified"
+    ? "matched"
+    : receiptVerification?.status === "ambiguous"
+      ? "ambiguous"
+      : receiptVerification?.status === "failed"
+        ? "failed"
+        : receiptVerification?.status === "pending"
+          ? "pending"
+          : latestExecution?.reconciliationState ?? reconciliation?.status ?? "none";
   const requiresHumanAction =
     blockers.length > 0 ||
     record.status === "approval_required" ||
@@ -2554,12 +2884,33 @@ function operatorBriefOrFallback(record: RunRecord, artifacts: ArtifactStore): O
     buildOperatorBrief(operatorSummaryOrFallback(record, artifacts));
 }
 
+function businessBriefOrFallback(record: RunRecord, artifacts: ArtifactStore): BusinessBrief {
+  return latestBusinessBrief(artifacts) ?? buildBusinessBrief({
+    goal: record.goal,
+    plane: record.plane,
+    goalIntake: goalIntakeFromArtifacts(artifacts) ?? traceGoalIntake(record),
+    operatorSummary: operatorSummaryOrFallback(record, artifacts),
+    selectedProposal: record.selectedProposal ?? preferredProposalName(record.proposals),
+    policyDecision: record.policyDecision,
+    latestExecution: record.executions.at(-1) ?? null,
+  });
+}
+
 function putOperatorSummaryArtifact(
   artifacts: ArtifactStore,
   record: RunRecord,
   producer: string,
 ): OperatorSummaryV3 {
   const summary = buildOperatorSummary(record, artifacts);
+  const businessBrief = buildBusinessBrief({
+    goal: record.goal,
+    plane: record.plane,
+    goalIntake: goalIntakeFromArtifacts(artifacts) ?? traceGoalIntake(record),
+    operatorSummary: summary,
+    selectedProposal: record.selectedProposal ?? preferredProposalName(record.proposals),
+    policyDecision: record.policyDecision,
+    latestExecution: record.executions.at(-1) ?? null,
+  });
   putArtifact(artifacts, {
     key: "report.operator-summary",
     version: currentArtifactVersion("report.operator-summary"),
@@ -2571,6 +2922,12 @@ function putOperatorSummaryArtifact(
     version: currentArtifactVersion("report.operator-brief"),
     producer,
     data: buildOperatorBrief(summary),
+  });
+  putArtifact(artifacts, {
+    key: "report.business-brief",
+    version: currentArtifactVersion("report.business-brief"),
+    producer,
+    data: businessBrief,
   });
   return summary;
 }
@@ -2986,7 +3343,11 @@ function markdownSection(title: string, lines: string[]): string {
   return [`## ${title}`, ...lines, ""].join("\n");
 }
 
-function exportBundlePayload(record: RunRecord, artifacts: ArtifactStore): Record<string, unknown> {
+async function exportBundlePayload(
+  record: RunRecord,
+  artifacts: ArtifactStore,
+  manifests: SkillManifest[],
+): Promise<PortableRunBundle> {
   const goalIntake = goalIntakeFromArtifacts(artifacts) ?? traceGoalIntake(record);
   const diagnosis = artifacts.get<EnvironmentDiagnosis>("diagnostics.readiness")?.data ?? null;
   const latestExecution = record.executions.at(-1) ?? null;
@@ -2994,18 +3355,28 @@ function exportBundlePayload(record: RunRecord, artifacts: ArtifactStore): Recor
   const reconciliationSummary = latestReconciliation(artifacts);
   const operatorSummary = operatorSummaryOrFallback(record, artifacts);
   const operatorBrief = operatorBriefOrFallback(record, artifacts);
+  const businessBrief = businessBriefOrFallback(record, artifacts);
   const skillCertification = latestSkillCertification(artifacts);
   const meshRouteProof = latestRouteProof(artifacts);
+  const manifestProof = buildManifestDigestProof(manifests);
 
   return {
+    bundleVersion: 1,
     runId: record.id,
+    runtimeVersion: await runtimeVersion(),
+    exportedAt: now(),
     goal: record.goal,
     plane: record.plane,
     status: record.status,
     routeKind: record.routeKind,
-    entrySkill: record.entrySkill ?? null,
-    createdAt: record.createdAt,
-    updatedAt: record.updatedAt,
+    route: [...record.route],
+    artifactSnapshot: artifacts.snapshot(),
+    operatorBrief,
+    businessBrief,
+    operatorSummary,
+    manifestProof,
+    meshRouteProof: meshRouteProof ?? undefined,
+    skillCertification,
     goalIntake,
     capabilitySnapshot: record.capabilitySnapshot,
     diagnosis,
@@ -3020,27 +3391,29 @@ function exportBundlePayload(record: RunRecord, artifacts: ArtifactStore): Recor
       reconciliationState: latestExecution?.reconciliationState ?? "none",
     },
     reconciliationSummary,
-    executionReceipts: record.executions,
+    executionReceipts: [...record.executions],
     latestExecution,
-    operatorSummary,
-    operatorBrief,
-    skillCertification,
-    meshRouteProof,
-    errors: record.errors,
-    notes: record.notes,
+    errors: [...record.errors],
+    notes: [...record.notes],
     nextActions: nextSafeAction(record),
   };
 }
 
-function exportReport(record: RunRecord, artifacts: ArtifactStore): string {
+function exportReport(
+  record: RunRecord,
+  artifacts: ArtifactStore,
+  manifestProof: ManifestDigestProof,
+): string {
   const goalIntake = goalIntakeFromArtifacts(artifacts) ?? traceGoalIntake(record);
   const latestExecution = record.executions.at(-1);
   const selectedProposal = record.selectedProposal ?? preferredProposalName(record.proposals);
   const operatorBrief = operatorBriefOrFallback(record, artifacts);
+  const businessBrief = businessBriefOrFallback(record, artifacts);
   const meshRouteProof = latestRouteProof(artifacts);
   return [
     `# TradeMesh Export Report`,
     "",
+    markdownSection("Business Brief", businessBriefLines(businessBrief)),
     markdownSection("Operator Brief", [
       `isExecutable: ${operatorBrief.isExecutable ? "yes" : "no"}`,
       `currentBlocker: ${operatorBrief.currentBlocker}`,
@@ -3074,6 +3447,7 @@ function exportReport(record: RunRecord, artifacts: ArtifactStore): string {
     ]),
     markdownSection("Policy Verdict", policyLines(record)),
     markdownSection("Mesh Proof", routeProofLines(meshRouteProof)),
+    markdownSection("Contract Proof", contractProofLines(manifestProof)),
     markdownSection(
       "Command Preview / Execution Receipt",
       latestExecution ? latestExecution.results.map(formatExecutionResult) : ["No execution receipt recorded."],
@@ -3117,8 +3491,8 @@ export async function exportRun(runId: string, options: ExportOptions = {}): Pro
   } else {
     operatorSummary = putOperatorSummaryArtifact(artifacts, record, "export-runtime");
   }
-  const bundle = exportBundlePayload(record, artifacts);
-  const report = exportReport(record, artifacts);
+  const bundle = await exportBundlePayload(record, artifacts, manifests);
+  const report = exportReport(record, artifacts, bundle.manifestProof);
 
   await fs.writeFile(paths.bundlePath, `${JSON.stringify(bundle, null, 2)}\n`, "utf8");
   await fs.writeFile(paths.reportPath, `${report}\n`, "utf8");
@@ -3154,7 +3528,9 @@ export function formatReplay(record: RunRecord): string {
   const operatorSummary = (operatorEntry?.metadata as { operatorSummary?: OperatorSummaryV3 } | undefined)?.operatorSummary;
   const operatorBrief = (operatorEntry?.metadata as { operatorBrief?: OperatorBrief } | undefined)?.operatorBrief ??
     (operatorSummary ? buildOperatorBrief(operatorSummary) : undefined);
+  const businessBrief = (operatorEntry?.metadata as { businessBrief?: BusinessBrief } | undefined)?.businessBrief;
   const meshProof = (meshProofEntry?.metadata as { routeProof?: RouteProof } | undefined)?.routeProof;
+  const contractProof = (replayEntry?.metadata as { contractProof?: ManifestDigestProof } | undefined)?.contractProof;
   const timelineRaw = Array.isArray(replayEntry?.metadata?.timeline) ? replayEntry.metadata?.timeline as string[] : [];
   const artifactRaw = Array.isArray(replayEntry?.metadata?.artifacts) ? replayEntry.metadata?.artifacts as string[] : [];
   const evidenceRaw = Array.isArray(replayEntry?.metadata?.evidence) ? replayEntry.metadata?.evidence as string[] : [];
@@ -3166,7 +3542,8 @@ export function formatReplay(record: RunRecord): string {
 
   return [
     ...header("Replay Timeline", record),
-    block("Operator Snapshot", [
+    ...(businessBrief ? [block("Business Brief", businessBriefLines(businessBrief))] : []),
+    block("Operator Brief", [
       `isExecutable: ${operatorBrief?.isExecutable ? "yes" : "no"}`,
       `currentBlocker: ${operatorBrief?.currentBlocker ?? latestExecution?.blockedReason ?? "none"}`,
       `approvalState: ${operatorBrief?.approvalState ?? (operatorSummary?.approval.ticketId ? "approved" : "missing")}`,
@@ -3181,6 +3558,7 @@ export function formatReplay(record: RunRecord): string {
       `Execution verdict: ${latestExecution?.status ?? "none"}`,
     ]),
     block("Mesh Proof", routeProofLines(meshProof ?? null)),
+    ...(contractProof ? [block("Contract Proof", contractProofLines(contractProof))] : []),
     block("Timeline", timelineRaw.length > 0 ? timelineRaw : ["No replay timeline captured."]),
     block("Artifact Handoffs", artifactRaw.length > 0 ? artifactRaw : ["No artifact handoffs captured."]),
     block("Policy Decision", policyLines(record)),

@@ -1,6 +1,7 @@
 import type {
   ArtifactKey,
   ArtifactSnapshot,
+  PortableRunBundle,
   PolicyDecision,
   SkillArtifact,
 } from "./types.js";
@@ -23,8 +24,10 @@ const ARTIFACT_KEYS: ArtifactKey[] = [
   "execution.idempotency-check",
   "approval.ticket",
   "execution.reconciliation",
+  "operations.receipt-verification",
   "report.operator-summary",
   "report.operator-brief",
+  "report.business-brief",
   "mesh.skill-certification",
   "mesh.route-proof",
   "diagnostics.probes",
@@ -232,6 +235,30 @@ export function validateArtifactData(key: ArtifactKey, data: unknown): void {
     return;
   }
 
+  if (key === "operations.receipt-verification") {
+    const record = asObject(data);
+    invariant(record, `Artifact '${key}' must be an object.`);
+    if ("status" in record) {
+      invariant(
+        ["verified", "pending", "ambiguous", "failed", "not_applicable"].includes(String(record.status)),
+        `Artifact '${key}.status' is invalid.`,
+      );
+    }
+    if ("matchedBy" in record) {
+      invariant(
+        ["client_order_ref", "fallback_window", "none"].includes(String(record.matchedBy)),
+        `Artifact '${key}.matchedBy' is invalid.`,
+      );
+    }
+    if ("evidence" in record) {
+      invariant(Array.isArray(record.evidence), `Artifact '${key}.evidence' must be an array.`);
+    }
+    if ("nextAction" in record) {
+      invariant(hasString(record.nextAction), `Artifact '${key}.nextAction' must be a string.`);
+    }
+    return;
+  }
+
   if (key === "execution.idempotency-check") {
     const record = asObject(data);
     invariant(record, `Artifact '${key}' must be an object.`);
@@ -307,6 +334,30 @@ export function validateArtifactData(key: ArtifactKey, data: unknown): void {
     return;
   }
 
+  if (key === "report.business-brief") {
+    const record = asObject(data);
+    invariant(record, `Artifact '${key}' must be an object.`);
+    if ("goalSummary" in record) {
+      invariant(typeof record.goalSummary === "string", `Artifact '${key}.goalSummary' must be a string.`);
+    }
+    if ("recommendedAction" in record) {
+      invariant(typeof record.recommendedAction === "string", `Artifact '${key}.recommendedAction' must be a string.`);
+    }
+    if ("canActNow" in record) {
+      invariant(typeof record.canActNow === "boolean", `Artifact '${key}.canActNow' must be a boolean.`);
+    }
+    if ("currentBlocker" in record) {
+      invariant(typeof record.currentBlocker === "string", `Artifact '${key}.currentBlocker' must be a string.`);
+    }
+    if ("riskBudgetSummary" in record) {
+      invariant(typeof record.riskBudgetSummary === "string", `Artifact '${key}.riskBudgetSummary' must be a string.`);
+    }
+    if ("nextSafeAction" in record) {
+      invariant(hasString(record.nextSafeAction), `Artifact '${key}.nextSafeAction' must be a string.`);
+    }
+    return;
+  }
+
   if (key === "mesh.skill-certification") {
     const record = asObject(data);
     invariant(record, `Artifact '${key}' must be an object.`);
@@ -342,6 +393,9 @@ export function validateArtifactData(key: ArtifactKey, data: unknown): void {
     }
     if ("proofPassed" in record) {
       invariant(typeof record.proofPassed === "boolean", `Artifact '${key}.proofPassed' must be a boolean.`);
+    }
+    if ("contractDrift" in record) {
+      invariant(typeof record.contractDrift === "boolean", `Artifact '${key}.contractDrift' must be a boolean.`);
     }
     if ("steps" in record) {
       invariant(Array.isArray(record.steps), `Artifact '${key}.steps' must be an array.`);
@@ -468,6 +522,43 @@ export function validateArtifactSnapshot(snapshot: ArtifactSnapshot): ArtifactSn
     invariant((artifact as SkillArtifact<unknown>).key === key, `Artifact snapshot entry '${key}' does not match its internal key.`);
   }
   return snapshot;
+}
+
+export function validatePortableRunBundle(bundle: unknown): PortableRunBundle {
+  const record = asObject(bundle);
+  invariant(record, "Portable bundle must be an object.");
+  invariant(record.bundleVersion === 1, "Portable bundle must use bundleVersion 1.");
+  invariant(hasString(record.runId), "Portable bundle is missing runId.");
+  invariant(hasString(record.runtimeVersion), "Portable bundle is missing runtimeVersion.");
+  invariant(hasString(record.exportedAt), "Portable bundle is missing exportedAt.");
+  invariant(hasString(record.goal), "Portable bundle is missing goal.");
+  invariant(
+    ["research", "demo", "live"].includes(String(record.plane)),
+    "Portable bundle has an invalid plane.",
+  );
+  invariant(
+    ["workflow", "standalone", "operations"].includes(String(record.routeKind)),
+    "Portable bundle has an invalid routeKind.",
+  );
+  invariant(Array.isArray(record.route), "Portable bundle route must be an array.");
+  invariant(asObject(record.artifactSnapshot), "Portable bundle is missing artifactSnapshot.");
+  validateArtifactSnapshot(record.artifactSnapshot as ArtifactSnapshot);
+  invariant(asObject(record.operatorBrief), "Portable bundle is missing operatorBrief.");
+  invariant(asObject(record.businessBrief), "Portable bundle is missing businessBrief.");
+  invariant(asObject(record.operatorSummary), "Portable bundle is missing operatorSummary.");
+  invariant(asObject(record.manifestProof), "Portable bundle is missing manifestProof.");
+
+  const manifestProof = record.manifestProof as JsonRecord;
+  invariant(hasString(manifestProof.registryDigest), "Portable bundle manifestProof.registryDigest must be a string.");
+  invariant(asObject(manifestProof.skillDigests), "Portable bundle manifestProof.skillDigests must be an object.");
+  invariant(
+    typeof manifestProof.matchedCurrentRegistry === "boolean",
+    "Portable bundle manifestProof.matchedCurrentRegistry must be a boolean.",
+  );
+  invariant(Array.isArray(manifestProof.driftedSkills), "Portable bundle manifestProof.driftedSkills must be an array.");
+  invariant(hasString(manifestProof.checkedAt), "Portable bundle manifestProof.checkedAt must be a string.");
+
+  return record as unknown as PortableRunBundle;
 }
 
 export function validateRuleCard<T extends RuleCardLike>(card: T): T {

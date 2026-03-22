@@ -6,7 +6,7 @@
 
 - Version: `v0.4.1`
 - Product framing: `CLI Skill Mesh 2.0 for OKX`
-- Status: production-grade supervised execution M2.7 (`proof-carrying mesh: resumable routes + executable skill proofs`)
+- Status: production-grade supervised execution M2.8 (`portable verified bundles + demo receipt verification + business-first replay/export`)
 
 ## What Is Now Implemented
 
@@ -24,12 +24,17 @@
 - `skills certify --strict` can now serve as a release gate
 - `skills run <name>` now executes manifest-declared standalone mini-workflows
 - `skills run --skip-satisfied` now supports artifact-based route resume/proof mode
+- `skills run --bundle <bundle.json>` now supports portable rerun from export bundles
 - `rehearse demo` now runs deterministic operations rehearsal route
+- `rehearse demo --execute --verify-receipt` now verifies demo receipts immediately after execute
 - `runs list` now shows structured run summaries
 - `reconcile <run-id>` now converges pending/ambiguous write outcomes with `--source auto|client-id|fallback` and `--window-min`
 - `reconcile --until-settled` now loops with bounded retries (`--max-attempts`, `--interval-sec`) and per-attempt evidence
 - `export <run-id>` now writes `report.md` + `bundle.json` + `operator-summary.json`
+- `bundle.json` is now a portable verified bundle with artifact snapshot + manifest proof
+- `replay --bundle <bundle.json>` now works without local run directories
 - replay/export now share the same six-field `report.operator-brief` first-screen contract
+- replay/export now also share a business-readable `report.business-brief` first screen
 - replay/export now render `mesh.route-proof` as a first-class proof layer
 - `apply` now accepts live supervised flags:
   - `--live-confirm YES_LIVE_EXECUTION`
@@ -60,6 +65,7 @@
 - apply write path now checks local idempotency gate before execution
 - write re-execution is skipped on idempotent hit and blocked on pending/ambiguous state
 - `replay` can render the route, evidence, policy verdict, execution receipt, and export pointer
+- `receipt-verifier` can verify freshly executed demo receipts without replaying writes
 
 ### Operations probe pack (new)
 
@@ -110,6 +116,7 @@
 - `SkillManifest.proofFixture`
 - `SkillManifest.proofTargetOutputs`
 - `RouteProof`
+- `RouteProof.contractDrift`
 - `ExecutionRecord.approvalTicketId`
 - `ExecutionRecord.idempotencyChecked`
 - `ExecutionRecord.reconciliationState`
@@ -125,13 +132,20 @@
 - `IdempotencyEvent`
 - `ReconciliationReport`
 - `OperatorSummaryV3`
+- `BusinessBrief`
+- `ManifestDigestProof`
+- `PortableRunBundle`
+- `ReceiptVerification`
 - `RunRecord.operatorState`
 - `RunRecord.lastSafeAction`
 - `RunRecord.requiresHumanAction`
+- `RunRecord.contractDrift`
 - `execution.idempotency-check`
 - `operations.live-guard`
+- `operations.receipt-verification`
 - `diagnostics.reason-catalog`
 - `report.operator-brief`
+- `report.business-brief`
 - `mesh.skill-certification`
 - `mesh.route-proof`
 
@@ -155,8 +169,10 @@ Key verified flows:
 - write intents never auto-retry even on retryable-looking errors
 - skills run standalone routes (including replay source-run targeting)
 - skills run resume mode (`--skip-satisfied`) with explicit proof output
+- portable bundle replay/rerun with manifest drift detection
 - doctor passive/active/write probe modes
 - rehearse demo dry-run/execute with rehearsal artifacts
+- demo receipt verification after execute
 - apply execute approval gate (`--approved-by`) and approval ticket persistence
 - write idempotent hit skip path
 - reconcile state convergence (`matched/ambiguous/failed`)
@@ -172,6 +188,8 @@ Key verified flows:
 - skills certify portable fixture proofs and rerun commands
 - mesh.route-proof generation across plan/apply/reconcile/replay/rehearse
 - replay/export mesh proof consistency
+- replay bundle flow without local run files
+- business brief consistency across replay/export
 - v3 hard-cutover rejection of v2 run/artifact envelopes
 
 ## What Still Matters Next

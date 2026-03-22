@@ -141,6 +141,7 @@ export default async function run(context: SkillContext): Promise<SkillOutput> {
   const route = asRoute(context.runtimeInput.route);
   const targetOutputs = asArtifactKeys(context.runtimeInput.targetOutputs);
   const skipped = new Map(asSkippedSteps(context.runtimeInput.skippedSteps).map((entry) => [entry.skill!, entry]));
+  const contractDrift = context.runtimeInput.contractDrift === true;
   const manifestsByName = new Map(context.manifests.map((manifest) => [manifest.name, manifest]));
   const certificationBySkill = certificationMap(context);
   const missingTargetOutputs = targetOutputs.filter((artifact) => !context.artifacts.has(artifact));
@@ -183,6 +184,7 @@ export default async function run(context: SkillContext): Promise<SkillOutput> {
     minimality,
     steps,
     resumePoints,
+    contractDrift,
     generatedAt: now(),
   };
 
@@ -204,6 +206,7 @@ export default async function run(context: SkillContext): Promise<SkillOutput> {
       `Missing targets: ${missingTargetOutputs.length}.`,
       `Resume points: ${resumePoints.length}.`,
       `Minimality: ${minimality.passed ? "passed" : "failed"}.`,
+      `Contract drift: ${contractDrift ? "yes" : "no"}.`,
     ],
     constraints: {
       routeKind: proof.routeKind,
@@ -211,6 +214,7 @@ export default async function run(context: SkillContext): Promise<SkillOutput> {
       targetOutputs,
       missingTargetOutputs,
       redundantSkills: minimality.redundantSkills,
+      contractDrift,
     },
     proposal: [],
     risk: {

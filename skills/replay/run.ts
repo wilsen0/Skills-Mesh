@@ -1,8 +1,10 @@
 import { loadArtifactSnapshot, loadExecutionEnvelope, loadPolicyEnvelope, loadTraceEnvelope } from "../../runtime/trace.js";
+import { buildManifestDigestProof } from "../../runtime/manifest-digest.js";
 import type {
   ArtifactKey,
   ArtifactSnapshot,
   ExecutionResult,
+  ManifestDigestProof,
   PolicyDecision,
   SkillContext,
   SkillOutput,
@@ -145,6 +147,7 @@ export default async function run(context: SkillContext): Promise<SkillOutput> {
   const artifactLines = summarizeArtifacts(artifactSnapshot);
   const evidenceLines = summarizeEvidence(replayTrace);
   const chain = timeline(replayTrace);
+  const manifestProof: ManifestDigestProof = buildManifestDigestProof(context.manifests);
 
   const facts = [
     `Replay entries: ${replayTrace.length}${skillFilter ? ` (skill filter: ${skillFilter})` : ""}.`,
@@ -191,6 +194,7 @@ export default async function run(context: SkillContext): Promise<SkillOutput> {
       policyDecision: latestDecision ?? null,
       latestExecutionCount: latestResults.length,
       traceLoadedFromFile: Boolean(traceEnvelope),
+      contractProof: manifestProof,
     },
     timestamp: new Date().toISOString(),
   };

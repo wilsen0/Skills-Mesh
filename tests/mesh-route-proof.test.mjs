@@ -36,6 +36,7 @@ test("plan/apply/replay write mesh.route-proof artifacts", async () => {
     let artifacts = await loadArtifactSnapshot(planned.id);
     assert.ok(artifacts["mesh.route-proof"]);
     assert.deepEqual(artifacts["mesh.route-proof"].data.targetOutputs, ["planning.proposals", "policy.plan-decision"]);
+    assert.equal(artifacts["mesh.route-proof"].data.contractDrift ?? false, false);
 
     await applyRun(planned.id, {
       plane: "demo",
@@ -49,11 +50,13 @@ test("plan/apply/replay write mesh.route-proof artifacts", async () => {
       artifacts["mesh.route-proof"].data.targetOutputs,
       ["execution.intent-bundle", "execution.apply-decision", "report.operator-summary"],
     );
+    assert.equal(artifacts["mesh.route-proof"].data.contractDrift ?? false, false);
 
     await replayRun(planned.id);
     artifacts = await loadArtifactSnapshot(planned.id);
     assert.ok(artifacts["mesh.route-proof"]);
     assert.deepEqual(artifacts["mesh.route-proof"].data.targetOutputs, ["report.operator-summary"]);
+    assert.equal(artifacts["mesh.route-proof"].data.contractDrift ?? false, false);
   });
 
   await cleanupRunArtifacts(runId);

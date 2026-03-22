@@ -1,9 +1,14 @@
 import { putArtifact } from "../../runtime/artifacts.js";
+import { buildBusinessBrief } from "../../runtime/business-brief.js";
 import { buildOperatorBrief } from "../../runtime/operator-brief.js";
 import type {
   ApprovalTicket,
+  BusinessBrief,
   ExecutionRecord,
+  GoalIntake,
   OperatorSummaryV3,
+  PolicyDecision,
+  ReceiptVerification,
   ReconciliationReport,
   RunStatus,
   SkillContext,
@@ -49,6 +54,10 @@ function selectedNextAction(context: SkillContext, status: RunStatus): string {
   if (typeof context.runtimeInput.nextSafeAction === "string" && context.runtimeInput.nextSafeAction.trim().length > 0) {
     return context.runtimeInput.nextSafeAction.trim();
   }
+  const verification = context.artifacts.get<ReceiptVerification>("operations.receipt-verification")?.data;
+  if (verification?.status && verification.status !== "verified" && verification.status !== "not_applicable") {
+    return verification.nextAction;
+  }
   if (status === "approval_required") {
     return `node dist/bin/trademesh.js apply ${context.runId} --plane ${context.plane} --approve --approved-by <name> --execute`;
   }
@@ -87,6 +96,11 @@ export default async function run(context: SkillContext): Promise<SkillOutput> {
   const execution = latestExecutionFromInput(context);
   const approvalTicket = context.artifacts.get<ApprovalTicket>("approval.ticket")?.data ?? null;
   const reconciliation = context.artifacts.get<ReconciliationReport>("execution.reconciliation")?.data ?? null;
+  const receiptVerification = context.artifacts.get<ReceiptVerification>("operations.receipt-verification")?.data ?? null;
+  const goalIntake = context.artifacts.get<GoalIntake>("goal.intake")?.data ?? null;
+  const policyDecision = context.artifacts.get<PolicyDecision>("execution.apply-decision")?.data ??
+    context.artifacts.get<PolicyDecision>("policy.plan-decision")?.data ??
+    null;
   const idempotencyCheck = context.artifacts.get<IdempotencyCheckArtifactLike>("execution.idempotency-check")?.data;
 
   const blockers: string[] = [];
@@ -102,12 +116,22 @@ export default async function run(context: SkillContext): Promise<SkillOutput> {
   if (idempotencyCheck?.status === "blocked_reconcile_required") {
     blockers.push("idempotency_reconcile_required");
   }
+  if (receiptVerification && receiptVerification.status !== "verified" && receiptVerification.status !== "not_applicable") {
+    blockers.push(`receipt_verification_${receiptVerification.status}`);
+  }
   if (reconciliation && reconciliation.status !== "matched") {
     blockers.push(`reconciliation_${reconciliation.status}`);
   }
 
-  const reconciliationState = execution?.reconciliationState ??
-    (reconciliation?.status ?? "none");
+  const reconciliationState = receiptVerification?.status === "verified"
+    ? "matched"
+    : receiptVerification?.status === "ambiguous"
+      ? "ambiguous"
+      : receiptVerification?.status === "failed"
+        ? "failed"
+        : receiptVerification?.status === "pending"
+          ? "pending"
+          : execution?.reconciliationState ?? (reconciliation?.status ?? "none");
   const requiresHumanAction =
     blockers.length > 0 ||
     reconciliationState === "pending" ||
@@ -145,6 +169,17 @@ export default async function run(context: SkillContext): Promise<SkillOutput> {
     generatedAt: now(),
   };
   const brief = buildOperatorBrief(summary);
+  const businessBrief: BusinessBrief = buildBusinessBrief({
+    goal: context.goal,
+    plane: context.plane,
+    goalIntake,
+    operatorSummary: summary,
+    selectedProposal: execution?.proposal ?? (typeof context.runtimeInput.selectedProposal === "string"
+      ? context.runtimeInput.selectedProposal
+      : undefined),
+    policyDecision,
+    latestExecution: execution,
+  });
 
   putArtifact(context.artifacts, {
     key: "report.operator-summary",
@@ -158,6 +193,12 @@ export default async function run(context: SkillContext): Promise<SkillOutput> {
     producer: context.manifest.name,
     data: brief,
   });
+  putArtifact(context.artifacts, {
+    key: "report.business-brief",
+    version: context.manifest.artifactVersion,
+    producer: context.manifest.name,
+    data: businessBrief,
+  });
 
   return {
     skill: "operator-summarizer",
@@ -170,6 +211,7 @@ export default async function run(context: SkillContext): Promise<SkillOutput> {
       `Requires human action: ${summary.requiresHumanAction ? "yes" : "no"}.`,
       `Blockers: ${summary.blockers.length}.`,
       `Primary blocker: ${brief.currentBlocker}.`,
+      `Business action: ${businessBrief.recommendedAction}.`,
       `Next safe action: ${summary.nextSafeAction}.`,
     ],
     constraints: {
@@ -192,11 +234,18 @@ export default async function run(context: SkillContext): Promise<SkillOutput> {
       allowedModules: [],
     },
     handoff: null,
-    producedArtifacts: ["report.operator-summary", "report.operator-brief"],
-    consumedArtifacts: ["approval.ticket", "execution.idempotency-check", "execution.reconciliation"],
+    producedArtifacts: ["report.operator-summary", "report.operator-brief", "report.business-brief"],
+    consumedArtifacts: [
+      "goal.intake",
+      "approval.ticket",
+      "execution.idempotency-check",
+      "execution.reconciliation",
+      "operations.receipt-verification",
+    ],
     metadata: {
       operatorSummary: summary,
       operatorBrief: brief,
+      businessBrief,
     },
     timestamp: now(),
   };

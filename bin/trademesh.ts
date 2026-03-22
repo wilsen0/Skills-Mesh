@@ -15,11 +15,13 @@ import {
   printSkillList,
   reconcileRun,
   replayRun,
+  replayBundle,
   rehearseDemo,
   runDemo,
   runSkillStandalone,
   retryRun,
 } from "../runtime/executor.js";
+import { validatePortableRunBundle } from "../runtime/contracts.js";
 import { runDoctor } from "../runtime/doctor.js";
 import type {
   ArtifactSnapshot,
@@ -77,16 +79,17 @@ function printHelp(): void {
   trademesh skills ls|list
   trademesh skills inspect <name> [--json]
   trademesh skills certify [--strict] [--json]
-  trademesh skills run <name> "<goal>" [--plane research|demo|live] [--symbol BTC,ETH] [--max-drawdown 4] [--intent protect-downside|reduce-beta|de-risk] [--horizon intraday|swing|position] [--input <artifact.json>] [--skip-satisfied] [--json]
+  trademesh skills run <name> "<goal>" [--plane research|demo|live] [--symbol BTC,ETH] [--max-drawdown 4] [--intent protect-downside|reduce-beta|de-risk] [--horizon intraday|swing|position] [--input <artifact.json>] [--bundle <bundle.json>] [--skip-satisfied] [--allow-contract-drift] [--json]
   trademesh skills graph [--json]
   trademesh runs list
   trademesh plan "<goal>" [--plane research|demo|live] [--profile demo|live] [--symbol BTC,ETH] [--max-drawdown 4] [--intent protect-downside|reduce-beta|de-risk] [--horizon intraday|swing|position] [--json]
-  trademesh rehearse demo [--execute] [--approve] [--json]
+  trademesh rehearse demo [--execute] [--approve] [--verify-receipt] [--json]
   trademesh replay <run-id> [--skill <name>] [--json]
+  trademesh replay --bundle <bundle.json> [--json]
   trademesh retry <run-id> [--json]
   trademesh reconcile <run-id> [--source auto|client-id|fallback] [--window-min <n>] [--until-settled] [--max-attempts <n>] [--interval-sec <n>] [--json]
   trademesh export <run-id> [--format md|json] [--output <path>] [--json]
-  trademesh apply <run-id> [--plane demo|live] [--profile demo|live] [--proposal <name>] [--approve] [--approved-by <name>] [--approval-reason <text>] [--live-confirm YES_LIVE_EXECUTION] [--max-order-usd <n>] [--max-total-usd <n>] [--execute] [--json]`);
+  trademesh apply <run-id> [--plane demo|live] [--profile demo|live] [--proposal <name>] [--approve] [--approved-by <name>] [--approval-reason <text>] [--live-confirm YES_LIVE_EXECUTION] [--max-order-usd <n>] [--max-total-usd <n>] [--execute] [--verify-receipt] [--json]`);
 }
 
 function inferPlaneFromGoal(goal: string): ExecutionPlane {
@@ -277,6 +280,14 @@ async function readInputArtifacts(pathValue: string | boolean | undefined): Prom
   throw new Error("Standalone --input must be a JSON object or an artifact envelope with an 'artifacts' field.");
 }
 
+async function readPortableBundle(pathValue: string | boolean | undefined) {
+  if (typeof pathValue !== "string" || pathValue.trim().length === 0) {
+    return undefined;
+  }
+  const raw = await readFile(pathValue, "utf8");
+  return validatePortableRunBundle(JSON.parse(raw) as unknown);
+}
+
 async function main(): Promise<void> {
   const args = process.argv.slice(2);
   const command = args[0];
@@ -361,11 +372,16 @@ async function main(): Promise<void> {
     if (!goal) {
       throw new Error("Missing goal. Example: trademesh skills run hedge-planner \"hedge btc drawdown\"");
     }
+    if (parsed.flags.input && parsed.flags.bundle) {
+      throw new Error("--input and --bundle are mutually exclusive for skills run.");
+    }
 
     const record = await runSkillStandalone(skillName, goal, {
       plane: resolvePlanPlane(goal, parsed.flags.plane, parsed.flags.profile),
       goalOverrides: goalOverridesFromFlags(parsed.flags, parsed.flags.execute === true ? "execute" : "dry_run"),
       inputArtifacts: await readInputArtifacts(parsed.flags.input),
+      bundle: await readPortableBundle(parsed.flags.bundle),
+      allowContractDrift: parsed.flags["allow-contract-drift"] === true,
       skipSatisfied: parsed.flags["skip-satisfied"] === true,
     });
     console.log(jsonMode ? JSON.stringify(record, null, 2) : formatRunSummary(record));
@@ -406,6 +422,7 @@ async function main(): Promise<void> {
     const record = await rehearseDemo({
       execute: parsed.flags.execute === true,
       approve: parsed.flags.approve === true,
+      verifyReceipt: parsed.flags["verify-receipt"] === true,
     });
     console.log(jsonMode ? JSON.stringify(record, null, 2) : formatRunSummary(record));
     return;
@@ -413,6 +430,14 @@ async function main(): Promise<void> {
 
   if (command === "replay") {
     const parsed = parseArgs(args.slice(1));
+    if (parsed.flags.bundle) {
+      if (parsed.positionals.length > 0) {
+        throw new Error("replay accepts either <run-id> or --bundle <bundle.json>, not both.");
+      }
+      const replayed = await replayBundle(String(parsed.flags.bundle));
+      console.log(jsonMode ? JSON.stringify(replayed, null, 2) : replayed.summary);
+      return;
+    }
     const runId = parsed.positionals[0];
 
     if (!runId) {
@@ -450,6 +475,7 @@ async function main(): Promise<void> {
       maxOrderUsd: parsePositiveNumber(parsed.flags["max-order-usd"]),
       maxTotalUsd: parsePositiveNumber(parsed.flags["max-total-usd"]),
       execute: parsed.flags.execute === true,
+      verifyReceipt: parsed.flags["verify-receipt"] === true,
     });
 
     console.log(jsonMode ? JSON.stringify(record, null, 2) : formatRunSummary(record));

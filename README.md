@@ -29,15 +29,19 @@ TradeMesh is optimized for operational clarity and operator trust:
 - `skills inspect` and `skills graph` expose the mesh topology from skill manifests
 - `skills certify --strict` now combines manifest checks with portable fixture proofs
 - `skills run <name> --skip-satisfied` can resume from existing artifacts instead of replaying the whole mini-route
+- `skills run <name> --bundle <bundle.json>` can resume directly from a portable export bundle
 - `plan` produces ranked proposals, actionability labels, and a policy preview
 - `apply` keeps dry-run first and routes every write through `official-executor` with apply-only approval tickets
 - write intents use local v3 idempotency journal+snapshot checks before execute
 - `reconcile` converges ambiguous/pending write outcomes without replaying writes
 - `reconcile --until-settled` loops reconcile attempts until matched or max attempts
 - `rehearse demo` validates policy + executor with a deterministic rehearsal route
+- `apply --execute --verify-receipt` verifies demo receipts immediately after execute
+- `rehearse demo --execute --verify-receipt` does the same on the rehearsal route
 - `replay` reconstructs the route, evidence, policy, and execution receipt
+- `replay --bundle <bundle.json>` works without local run directories
 - every major run writes `mesh.route-proof`, so replay/export can show route minimality and safe rerun points
-- `export` materializes a run report, machine-readable bundle, operator summary, skill certification evidence, and route proof evidence
+- `export` materializes a run report, a portable verified bundle, operator summary, business brief, skill certification evidence, and route proof evidence
 
 ## Quick Start
 
@@ -50,12 +54,14 @@ node dist/bin/trademesh.js skills ls
 node dist/bin/trademesh.js skills graph
 node dist/bin/trademesh.js skills certify --strict
 node dist/bin/trademesh.js skills run hedge-planner "hedge my BTC drawdown with demo first" --plane demo --input skills/hedge-planner/proof/input.artifacts.json --skip-satisfied
+node dist/bin/trademesh.js skills run hedge-planner "hedge my BTC drawdown with demo first" --plane demo --bundle .trademesh/exports/<run-id>/bundle.json --skip-satisfied
 node dist/bin/trademesh.js plan "hedge my BTC drawdown with demo first" --plane demo --symbol BTC --max-drawdown 4 --intent protect-downside --horizon swing
-node dist/bin/trademesh.js apply <run-id> --plane demo --proposal protective-put --approve --approved-by alice
+node dist/bin/trademesh.js apply <run-id> --plane demo --proposal protective-put --approve --approved-by alice --execute --verify-receipt
 node dist/bin/trademesh.js apply <run-id> --plane live --proposal protective-put --approve --approved-by alice --live-confirm YES_LIVE_EXECUTION --max-order-usd 500 --max-total-usd 1500 --execute
 node dist/bin/trademesh.js reconcile <run-id> --source auto --window-min 120 --until-settled --max-attempts 3 --interval-sec 5
-node dist/bin/trademesh.js rehearse demo --approve
+node dist/bin/trademesh.js rehearse demo --approve --execute --verify-receipt
 node dist/bin/trademesh.js replay <run-id>
+node dist/bin/trademesh.js replay --bundle .trademesh/exports/<run-id>/bundle.json
 node dist/bin/trademesh.js export <run-id>
 node dist/bin/trademesh.js demo "hedge my BTC drawdown with demo first" --plane demo
 pnpm test
@@ -68,13 +74,14 @@ pnpm test
 - `trademesh skills ls|list`
 - `trademesh skills inspect <name> [--json]`
 - `trademesh skills certify [--strict] [--json]`
-- `trademesh skills run <name> "<goal>" [--plane research|demo|live] [--symbol <CSV>] [--max-drawdown <number>] [--intent protect-downside|reduce-beta|de-risk] [--horizon intraday|swing|position] [--input <artifact.json>] [--skip-satisfied] [--json]`
+- `trademesh skills run <name> "<goal>" [--plane research|demo|live] [--symbol <CSV>] [--max-drawdown <number>] [--intent protect-downside|reduce-beta|de-risk] [--horizon intraday|swing|position] [--input <artifact.json>] [--bundle <bundle.json>] [--skip-satisfied] [--allow-contract-drift] [--json]`
 - `trademesh skills graph [--json]`
 - `trademesh runs list`
 - `trademesh plan "<goal>" [--plane research|demo|live] [--profile demo|live] [--symbol <CSV>] [--max-drawdown <number>] [--intent protect-downside|reduce-beta|de-risk] [--horizon intraday|swing|position] [--json]`
-- `trademesh apply <run-id> [--plane demo|live] [--profile demo|live] [--proposal <name>] [--approve] [--approved-by <name>] [--approval-reason <text>] [--live-confirm YES_LIVE_EXECUTION] [--max-order-usd <n>] [--max-total-usd <n>] [--execute] [--json]`
-- `trademesh rehearse demo [--execute] [--approve] [--json]`
+- `trademesh apply <run-id> [--plane demo|live] [--profile demo|live] [--proposal <name>] [--approve] [--approved-by <name>] [--approval-reason <text>] [--live-confirm YES_LIVE_EXECUTION] [--max-order-usd <n>] [--max-total-usd <n>] [--execute] [--verify-receipt] [--json]`
+- `trademesh rehearse demo [--execute] [--approve] [--verify-receipt] [--json]`
 - `trademesh replay <run-id> [--skill <name>] [--json]`
+- `trademesh replay --bundle <bundle.json> [--json]`
 - `trademesh retry <run-id> [--json]`
 - `trademesh reconcile <run-id> [--source auto|client-id|fallback] [--window-min <n>] [--until-settled] [--max-attempts <n>] [--interval-sec <n>] [--json]`
 - `trademesh export <run-id> [--format md|json] [--output <path>] [--json]`
@@ -117,6 +124,8 @@ This makes planning more deterministic than the earlier prompt-only heuristics.
 - every skill manifest now declares `standalone_route`, `standalone_inputs`, and `standalone_outputs`
 - `skills run <name>` executes that explicit mini-workflow route without trigger-based auto-routing
 - `--skip-satisfied` turns standalone execution into a resume/proof mode by skipping already satisfied upstream outputs
+- `--bundle <bundle.json>` seeds standalone execution from a portable export bundle instead of a local run directory
+- bundle-backed rerun checks manifest drift by default and blocks unless `--allow-contract-drift` is explicit
 - standalone runs are persisted as normal auditable runs with `routeKind=standalone`
 
 ## Proof-Carrying Mesh
@@ -126,12 +135,14 @@ This makes planning more deterministic than the earlier prompt-only heuristics.
   - `structural`: keeps a structural contract but does not pretend to be environment-free
 - `skills certify` now runs portable fixture routes and records `proofPassed`, `proofMode`, and `rerunCommand`
 - every major `plan/apply/reconcile/replay/rehearse` run now writes `mesh.route-proof`
+- `export` now writes a portable verified bundle with `artifactSnapshot` and `manifestProof`
+- bundle replay/rerun checks whether the current skill contracts still match the bundle's original proof contract
 - `mesh.route-proof` records:
   - which route steps executed
   - which steps were `skipped_satisfied`
   - whether the route is minimally sufficient for its target outputs
   - which skills are safe resume points
-- replay/export render a `Mesh Proof` section from that artifact instead of inventing a separate explanation layer
+- replay/export render `Business Brief`, `Operator Brief`, `Mesh Proof`, and `Contract Proof`
 
 ## Active Probe + Rehearsal
 
@@ -142,6 +153,7 @@ This makes planning more deterministic than the earlier prompt-only heuristics.
 - `rehearse demo` runs a deterministic operations route:
   - `env-probe -> market-probe -> account-probe -> diagnosis-synthesizer -> rehearsal-planner -> policy-gate -> official-executor`
 - rehearsal writes `operations.rehearsal-plan` and `operations.rehearsal-receipt` artifacts
+- `receipt-verifier` can verify fresh demo execute receipts immediately after execution
 
 ## Approval + Reconcile
 
@@ -151,10 +163,10 @@ This makes planning more deterministic than the earlier prompt-only heuristics.
 - `reconcile <run-id> --source auto|client-id|fallback --window-min <n>` updates `execution.reconciliation` and converges pending/ambiguous write state
 - `reconcile --until-settled --max-attempts <n> --interval-sec <n>` loops and appends per-attempt evidence until matched or max-attempt exit
 - `export` writes `report.md`, `bundle.json`, and `operator-summary.json`
-- `report.operator-brief` is now the single six-field operator first-screen source for replay/export
-- `bundle.json` now carries `mesh.skill-certification` and `mesh.route-proof` for external proof of modularity and resumability
+- `report.business-brief` and `report.operator-brief` now drive the first screen for replay/export
+- `bundle.json` now carries `artifactSnapshot`, `manifestProof`, `mesh.skill-certification`, and `mesh.route-proof` for portable proof and rerun
 - apply route now includes explicit guardrail chain:
-  - `policy-gate -> approval-gate -> live-guard -> official-executor -> idempotency-gate -> operator-summarizer`
+  - `policy-gate -> approval-gate -> live-guard -> official-executor -> idempotency-gate -> [receipt-verifier] -> operator-summarizer`
 
 ## Skill Certification
 
@@ -182,10 +194,10 @@ node dist/bin/trademesh.js doctor --probe active --plane demo --strict --strict-
 node dist/bin/trademesh.js skills graph
 node dist/bin/trademesh.js skills certify --strict
 node dist/bin/trademesh.js plan "hedge my BTC drawdown with demo first" --plane demo --symbol BTC --max-drawdown 4 --intent protect-downside --horizon swing
-node dist/bin/trademesh.js apply <run-id> --plane demo --proposal protective-put --approve --approved-by alice --execute
-node dist/bin/trademesh.js reconcile <run-id> --source auto --window-min 120 --until-settled --max-attempts 3 --interval-sec 5
+node dist/bin/trademesh.js apply <run-id> --plane demo --proposal protective-put --approve --approved-by alice --execute --verify-receipt
 node dist/bin/trademesh.js replay <run-id>
 node dist/bin/trademesh.js export <run-id>
+node dist/bin/trademesh.js replay --bundle .trademesh/exports/<run-id>/bundle.json
 ```
 
 If local OKX demo credentials are configured and you want the final proof point:

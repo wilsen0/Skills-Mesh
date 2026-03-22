@@ -64,11 +64,14 @@ TradeMesh 更接近以下产品，而不是聊天助手：
 - 通过 `skills certify --strict` 把 modularity proof 变成可执行门禁
 - 通过 `skills run <name>` 独立调用任意 skill 的 mini-workflow
 - 通过 `skills run --skip-satisfied` 基于现有 artifacts 从中间恢复 skill 路由
+- 通过 `skills run --bundle <bundle.json>` 从导出的 portable bundle 恢复 skill 路由
 - 通过 `rehearse demo` 做标准化演练并生成 rehearsal receipt
+- 通过 `apply --execute --verify-receipt` 或 `rehearse demo --execute --verify-receipt` 在 demo 下立即验证 receipt/readback
 - 在 dry-run 模式下生成结构化命令预览
 - 用 `reconcile --until-settled` 自动循环收敛不确定执行状态
 - replay 一次 run 的完整链路
-- export 一份可阅读的 `report.md`、一份可集成的 `bundle.json`、以及 operator 视角的 `operator-summary.json`（含六字段 first screen）
+- 用 `replay --bundle <bundle.json>` 在没有本地 run 目录的情况下直接查看结果
+- export 一份可阅读的 `report.md`、一份可携带可验证的 `bundle.json`、以及 operator 视角的 `operator-summary.json`
 
 典型命令如下：
 
@@ -78,17 +81,19 @@ node dist/bin/trademesh.js doctor --probe active --plane demo --strict --strict-
 node dist/bin/trademesh.js skills graph
 node dist/bin/trademesh.js skills certify --strict
 node dist/bin/trademesh.js skills run hedge-planner "hedge my BTC drawdown with demo first" --plane demo --input skills/hedge-planner/proof/input.artifacts.json --skip-satisfied
+node dist/bin/trademesh.js skills run hedge-planner "hedge my BTC drawdown with demo first" --plane demo --bundle .trademesh/exports/<run-id>/bundle.json --skip-satisfied
 node dist/bin/trademesh.js plan "hedge my BTC drawdown with demo first" \
   --plane demo \
   --symbol BTC \
   --max-drawdown 4 \
   --intent protect-downside \
   --horizon swing
-node dist/bin/trademesh.js apply <run-id> --plane demo --proposal protective-put --approve --approved-by alice --execute
+node dist/bin/trademesh.js apply <run-id> --plane demo --proposal protective-put --approve --approved-by alice --execute --verify-receipt
 node dist/bin/trademesh.js apply <run-id> --plane live --proposal protective-put --approve --approved-by alice --live-confirm YES_LIVE_EXECUTION --max-order-usd 500 --max-total-usd 1500 --execute
 node dist/bin/trademesh.js reconcile <run-id> --source auto --window-min 120 --until-settled --max-attempts 3 --interval-sec 5
-node dist/bin/trademesh.js rehearse demo --approve
+node dist/bin/trademesh.js rehearse demo --approve --execute --verify-receipt
 node dist/bin/trademesh.js replay <run-id>
+node dist/bin/trademesh.js replay --bundle .trademesh/exports/<run-id>/bundle.json
 node dist/bin/trademesh.js export <run-id>
 ```
 
@@ -344,6 +349,32 @@ M2.7 则把这个方向进一步收口成 proof-carrying mesh：
 
 - `portable` skill 会读取 proof fixture，真的跑一遍 mini-route
 - `structural` skill 明确只做结构合同证明，不假装脱离环境也能本地证明
+
+### 8.10 Portable Verified Bundles（M2.8）
+
+M2.8 把 proof-carrying runtime 再推进了一步：proof 不再只绑定本地 run 目录，而是可以随导出的 bundle 一起携带。
+
+这版新增了三件直接影响日常使用的能力：
+
+- `bundle.json` 现在是 portable verified bundle，内含：
+  - `artifactSnapshot`
+  - `manifestProof`
+  - `businessBrief`
+  - `operatorSummary`
+  - `meshRouteProof`
+- `replay --bundle <bundle.json>` 可以在没有本地 `.trademesh/runs/<id>/` 的情况下直接复核一次 run
+- `skills run --bundle <bundle.json>` 可以在合同未漂移时直接做局部 rerun；若合同漂移，系统会明确阻断，除非显式 `--allow-contract-drift`
+
+同时，demo execute 也新增了即时验证能力：
+
+- `apply --execute --verify-receipt`
+- `rehearse demo --execute --verify-receipt`
+
+这意味着 demo execute 不再只是“执行过”，而是可以立即告诉您：
+
+- receipt 是否已经可回读
+- 当前是 `verified`、`pending`、`ambiguous` 还是 `failed`
+- 下一步安全动作是否应当进入 `reconcile`
 - 认证结果会给出 `proofPassed`、`proofMode`、`rerunCommand`
 
 这让 TradeMesh 的创新点不再停留在“理念描述”，而是可以产出机器可验证报告。

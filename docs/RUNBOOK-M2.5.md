@@ -1,6 +1,6 @@
-# TradeMesh M2.7 Runbook
+# TradeMesh M2.8 Runbook
 
-This runbook covers supervised execution operations for `v3` runtime and artifacts with M2.7 proof-carrying mesh hardening.
+This runbook covers supervised execution operations for `v3` runtime and artifacts with M2.8 portable verified bundles and demo receipt verification.
 
 ## 1. Pre-Apply Execute Checklist
 
@@ -11,8 +11,8 @@ This runbook covers supervised execution operations for `v3` runtime and artifac
 3. Verify mesh contract integrity (once per release or deployment):
    - `node dist/bin/trademesh.js skills certify --strict`
 4. Verify selected proposal is actionable and policy approved.
-5. Execute with explicit approval:
-   - `node dist/bin/trademesh.js apply <run-id> --plane demo --proposal <name> --approve --approved-by <operator> --execute`
+5. Execute with explicit approval and receipt verification when you want a portable evidence pack:
+   - `node dist/bin/trademesh.js apply <run-id> --plane demo --proposal <name> --approve --approved-by <operator> --execute --verify-receipt`
 6. If blocked by idempotency/reconcile, do not rerun execute directly.
 
 ## 2. Live Supervised Execute Checklist
@@ -56,13 +56,27 @@ Use this when a route already has enough artifacts and you want to resume or pro
 4. Re-export if needed:
    - `node dist/bin/trademesh.js export <run-id>`
 
-## 5. Idempotency Ledger Files
+## 5. Portable Bundle Flow
+
+Use this when you want replay or rerun on another machine or after local run files are gone.
+
+1. Export the portable bundle:
+   - `node dist/bin/trademesh.js export <run-id>`
+2. Replay directly from the bundle:
+   - `node dist/bin/trademesh.js replay --bundle .trademesh/exports/<run-id>/bundle.json`
+3. Resume a skill route from the bundle:
+   - `node dist/bin/trademesh.js skills run <skill> "<goal>" --plane demo --bundle .trademesh/exports/<run-id>/bundle.json --skip-satisfied`
+4. If replay reports contract drift, rerun is blocked by default.
+5. Only override drift explicitly:
+   - `node dist/bin/trademesh.js skills run <skill> "<goal>" --plane demo --bundle .trademesh/exports/<run-id>/bundle.json --skip-satisfied --allow-contract-drift`
+
+## 6. Idempotency Ledger Files
 
 - `.trademesh/ledgers/idempotency.v3.snapshot.json`
 - `.trademesh/ledgers/idempotency.v3.journal.jsonl`
 - `.trademesh/ledgers/idempotency.v3.lock`
 
-## 6. Lock Handling and Recovery
+## 7. Lock Handling and Recovery
 
 The runtime acquires lock with `O_EXCL`, retries 5 times, and treats locks older than 120s as stale.
 
@@ -74,7 +88,7 @@ If apply is blocked by ledger lock:
    - `rm .trademesh/ledgers/idempotency.v3.lock`
 4. Retry apply/reconcile.
 
-## 7. Ledger Corruption Recovery
+## 8. Ledger Corruption Recovery
 
 If ledger files are corrupted or unreadable:
 
@@ -87,7 +101,7 @@ If ledger files are corrupted or unreadable:
    - `rm -f .trademesh/ledgers/idempotency.v3.lock`
 4. Re-run `reconcile` first, then `apply`.
 
-## 8. Doctor Reason Catalog Use
+## 9. Doctor Reason Catalog Use
 
 When `doctor --probe active` fails, use reason catalog fields:
 
@@ -101,7 +115,7 @@ Recommended loop:
 3. Run each `nextActionCmd`
 4. Re-run doctor until strict pass
 
-## 9. Hard Cutover Notes
+## 10. Hard Cutover Notes
 
 - Runtime only accepts `RunRecord.version = 3`.
 - Runtime only accepts artifact envelopes `version = 3`.

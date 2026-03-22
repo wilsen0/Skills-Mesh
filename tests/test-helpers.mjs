@@ -144,6 +144,10 @@ if [[ "$cmd1" == "option" && "$cmd2" == "place-order" ]]; then
   exit 0
 fi
 if [[ "$cmd1" == "trade" && "$cmd2" == "orders-history" ]]; then
+  if [[ "${payloads.tradeOrdersHistoryCommandFailure ? "1" : "0"}" == "1" ]]; then
+    echo 'orders-history failed' >&2
+    exit 1
+  fi
   clOrdId=""
   instId=""
   while [[ $# -gt 0 ]]; do
