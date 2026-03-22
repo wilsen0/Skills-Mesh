@@ -11,7 +11,7 @@ triggers: [idempotency, fingerprint, duplicate, reconcile]
 entrypoint: ./run.js
 consumes: [execution.intent-bundle, approval.ticket, execution.apply-decision]
 produces: [execution.idempotency-check]
-preferred_handoffs: [official-executor]
+preferred_handoffs: [operator-summarizer]
 repeatable: true
 artifact_version: 3
 contract_version: 1

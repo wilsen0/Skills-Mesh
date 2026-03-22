@@ -1,8 +1,8 @@
 import { putArtifact } from "../../runtime/artifacts.js";
+import { buildOperatorBrief } from "../../runtime/operator-brief.js";
 import type {
   ApprovalTicket,
   ExecutionRecord,
-  OperatorBrief,
   OperatorSummaryV3,
   ReconciliationReport,
   RunStatus,
@@ -80,28 +80,6 @@ function computeLedgerSeq(execution: ExecutionRecord | null, idempotencyCheck: I
     return null;
   }
   return Math.max(...seqs);
-}
-
-function buildOperatorBrief(summary: OperatorSummaryV3): OperatorBrief {
-  const approvalState = summary.approval.ticketId
-    ? `approved(${summary.approval.approvedBy ?? "unknown"})`
-    : summary.approval.provided
-      ? "approve_flag_only"
-      : "missing";
-  const idempotencyState = summary.idempotency.checked
-    ? summary.idempotency.hitCount > 0
-      ? `checked(hit=${summary.idempotency.hitCount})`
-      : "checked(clean)"
-    : "unchecked";
-  return {
-    runId: summary.runId,
-    isExecutable: summary.isExecutable,
-    currentBlocker: summary.blockers[0] ?? "none",
-    approvalState,
-    idempotencyState,
-    reconciliationState: summary.reconciliation.state,
-    nextSafeAction: summary.nextSafeAction,
-  };
 }
 
 export default async function run(context: SkillContext): Promise<SkillOutput> {

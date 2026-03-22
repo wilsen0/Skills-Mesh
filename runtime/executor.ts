@@ -13,6 +13,7 @@ import {
   markWriteIntentExecuted,
 } from "./idempotency.js";
 import { buildSkillGraphView, inspectSkillSurface, type SkillGraphView, type SkillRuntimeSurface } from "./mesh.js";
+import { buildOperatorBrief } from "./operator-brief.js";
 import { getProjectPaths } from "./paths.js";
 import { evaluatePolicy } from "./policy.js";
 import { loadSkillHandler, loadSkillRegistry } from "./registry.js";
@@ -2262,28 +2263,6 @@ function buildOperatorSummary(record: RunRecord, artifacts: ArtifactStore): Oper
     nextSafeAction: operatorNextAction(record, artifacts),
     requiresHumanAction,
     generatedAt: now(),
-  };
-}
-
-function buildOperatorBrief(summary: OperatorSummaryV3): OperatorBrief {
-  const approvalState = summary.approval.ticketId
-    ? `approved(${summary.approval.approvedBy ?? "unknown"})`
-    : summary.approval.provided
-      ? "approve_flag_only"
-      : "missing";
-  const idempotencyState = summary.idempotency.checked
-    ? summary.idempotency.hitCount > 0
-      ? `checked(hit=${summary.idempotency.hitCount})`
-      : "checked(clean)"
-    : "unchecked";
-  return {
-    runId: summary.runId,
-    isExecutable: summary.isExecutable,
-    currentBlocker: summary.blockers[0] ?? "none",
-    approvalState,
-    idempotencyState,
-    reconciliationState: summary.reconciliation.state,
-    nextSafeAction: summary.nextSafeAction,
   };
 }
 

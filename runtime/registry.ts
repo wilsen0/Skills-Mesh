@@ -208,13 +208,20 @@ function normalizeManifest(path: string, fields: Record<string, FrontmatterValue
   };
 }
 
-function validateStandaloneRoutes(manifests: SkillManifest[]): void {
+function validateManifestReferences(manifests: SkillManifest[]): void {
   const names = new Set(manifests.map((manifest) => manifest.name));
   for (const manifest of manifests) {
     for (const step of manifest.standaloneRoute) {
       assertManifest(
         names.has(step),
         `standalone_route references unknown skill '${step}'`,
+        manifest.path,
+      );
+    }
+    for (const handoff of manifest.preferredHandoffs) {
+      assertManifest(
+        names.has(handoff),
+        `preferred_handoffs references unknown skill '${handoff}'`,
         manifest.path,
       );
     }
@@ -240,7 +247,7 @@ export async function loadSkillRegistry(): Promise<SkillManifest[]> {
     manifests.push(normalizeManifest(manifestPath, parseFrontmatter(markdown)));
   }
 
-  validateStandaloneRoutes(manifests);
+  validateManifestReferences(manifests);
 
   return manifests.sort((left, right) => left.name.localeCompare(right.name));
 }

@@ -8,8 +8,12 @@ import { loadSkillRegistry } from "../dist/runtime/registry.js";
 test("registry parses extended skill contract frontmatter", async () => {
   const manifests = await loadSkillRegistry();
   const thesis = manifests.find((manifest) => manifest.name === "trade-thesis");
+  const liveGuard = manifests.find((manifest) => manifest.name === "live-guard");
+  const idempotencyGate = manifests.find((manifest) => manifest.name === "idempotency-gate");
 
   assert.ok(thesis);
+  assert.ok(liveGuard);
+  assert.ok(idempotencyGate);
   assert.equal(thesis.role, "synthesizer");
   assert.deepEqual(thesis.consumes, ["portfolio.snapshot", "portfolio.risk-profile", "market.regime"]);
   assert.deepEqual(thesis.produces, ["trade.thesis"]);
@@ -21,6 +25,8 @@ test("registry parses extended skill contract frontmatter", async () => {
   assert.equal(thesis.contractVersion, 1);
   assert.equal(thesis.safetyClass, "read");
   assert.equal(thesis.determinism, "high");
+  assert.deepEqual(liveGuard.preferredHandoffs, ["official-executor"]);
+  assert.deepEqual(idempotencyGate.preferredHandoffs, ["operator-summarizer"]);
 });
 
 test("graph runtime honors artifact dependencies and preferred handoffs", async () => {

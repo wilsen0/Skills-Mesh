@@ -11,7 +11,7 @@ triggers: [live, guard, execute, confirmation, approval]
 entrypoint: ./run.js
 consumes: [goal.intake, policy.plan-decision, diagnostics.readiness]
 produces: [operations.live-guard]
-preferred_handoffs: [idempotency-gate]
+preferred_handoffs: [official-executor]
 repeatable: true
 artifact_version: 3
 contract_version: 1

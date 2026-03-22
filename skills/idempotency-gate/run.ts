@@ -170,7 +170,7 @@ export default async function run(context: SkillContext): Promise<SkillOutput> {
       officialWriteOnly: true,
       allowedModules: [],
     },
-    handoff: blockedCount > 0 ? null : "official-executor",
+    handoff: blockedCount > 0 ? null : "operator-summarizer",
     handoffReason: blockedCount > 0
       ? "Execution is blocked until reconcile settles pending/ambiguous write fingerprints."
       : "Idempotency gate passed for execute.",
