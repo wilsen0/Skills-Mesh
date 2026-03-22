@@ -1,5 +1,4 @@
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createArtifactStore } from "../dist/runtime/artifacts.js";
 
@@ -87,7 +86,7 @@ export async function buildReferencePayloads() {
 }
 
 export async function withMockOkx(payloads, fn) {
-  const dir = await mkdtemp(join(tmpdir(), "okx-skill-mesh-test-"));
+  const dir = await mkdtemp(join(process.cwd(), ".mock-okx-"));
   const scriptPath = join(dir, "okx");
   const clOrdBranches = Object.entries(payloads.tradeOrdersHistoryByClOrdId ?? {})
     .map(([clOrdId, response]) =>

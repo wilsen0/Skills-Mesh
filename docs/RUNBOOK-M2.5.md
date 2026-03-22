@@ -23,7 +23,24 @@ This runbook covers supervised execution operations for `v3` runtime and artifac
    - `node dist/bin/trademesh.js apply <run-id> --plane live --proposal <name> --approve --approved-by <operator> --live-confirm YES_LIVE_EXECUTION --max-order-usd <n> --max-total-usd <n> --execute`
 3. If `operations.live-guard` is `blocked`, follow `nextAction` and retry only after remediation.
 
-## 3. Reconcile Procedure
+## 3. One-Command Demo Flow
+
+Use this when you want the standard operator-facing demo routine without manually typing every step.
+
+1. Dry-run portable evidence flow:
+   - `pnpm demo:flow`
+2. Verified demo execute flow:
+   - `pnpm demo:flow -- --execute --approved-by <operator>`
+3. The wrapper runs:
+   - `doctor`
+   - `skills certify --strict`
+   - `plan`
+   - `apply`
+   - `export`
+   - `replay --bundle`
+4. `--execute` only works on `demo` plane in this wrapper.
+
+## 4. Reconcile Procedure
 
 Use reconcile when latest apply execute reports `pending`/`ambiguous` or operator summary requires reconcile.
 
@@ -42,7 +59,7 @@ Use reconcile when latest apply execute reports `pending`/`ambiguous` or operato
 
 `--until-settled` only converges state. It does not auto-replay write intents.
 
-## 4. Proof-Carrying Resume Flow
+## 5. Proof-Carrying Resume Flow
 
 Use this when a route already has enough artifacts and you want to resume or prove a skill path instead of re-running the whole chain.
 
@@ -56,7 +73,7 @@ Use this when a route already has enough artifacts and you want to resume or pro
 4. Re-export if needed:
    - `node dist/bin/trademesh.js export <run-id>`
 
-## 5. Portable Bundle Flow
+## 6. Portable Bundle Flow
 
 Use this when you want replay or rerun on another machine or after local run files are gone.
 
@@ -70,13 +87,13 @@ Use this when you want replay or rerun on another machine or after local run fil
 5. Only override drift explicitly:
    - `node dist/bin/trademesh.js skills run <skill> "<goal>" --plane demo --bundle .trademesh/exports/<run-id>/bundle.json --skip-satisfied --allow-contract-drift`
 
-## 6. Idempotency Ledger Files
+## 7. Idempotency Ledger Files
 
 - `.trademesh/ledgers/idempotency.v3.snapshot.json`
 - `.trademesh/ledgers/idempotency.v3.journal.jsonl`
 - `.trademesh/ledgers/idempotency.v3.lock`
 
-## 7. Lock Handling and Recovery
+## 8. Lock Handling and Recovery
 
 The runtime acquires lock with `O_EXCL`, retries 5 times, and treats locks older than 120s as stale.
 
@@ -88,7 +105,7 @@ If apply is blocked by ledger lock:
    - `rm .trademesh/ledgers/idempotency.v3.lock`
 4. Retry apply/reconcile.
 
-## 8. Ledger Corruption Recovery
+## 9. Ledger Corruption Recovery
 
 If ledger files are corrupted or unreadable:
 
@@ -101,7 +118,7 @@ If ledger files are corrupted or unreadable:
    - `rm -f .trademesh/ledgers/idempotency.v3.lock`
 4. Re-run `reconcile` first, then `apply`.
 
-## 9. Doctor Reason Catalog Use
+## 10. Doctor Reason Catalog Use
 
 When `doctor --probe active` fails, use reason catalog fields:
 
@@ -115,7 +132,7 @@ Recommended loop:
 3. Run each `nextActionCmd`
 4. Re-run doctor until strict pass
 
-## 10. Hard Cutover Notes
+## 11. Hard Cutover Notes
 
 - Runtime only accepts `RunRecord.version = 3`.
 - Runtime only accepts artifact envelopes `version = 3`.

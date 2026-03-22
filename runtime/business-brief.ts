@@ -41,9 +41,19 @@ function renderRecommendedAction(
   if (operatorSummary.blockers.length > 0) {
     return "Clear the current blocker before taking the next trading action.";
   }
-  if (latestExecution?.mode === "execute" && latestExecution.status === "executed") {
+
+  if (
+    latestExecution?.mode === "execute" &&
+    latestExecution.status === "executed" &&
+    operatorSummary.reconciliation.state === "matched"
+  ) {
     return "Review the verified receipt and export the evidence bundle.";
   }
+
+  if (latestExecution?.mode === "execute" && latestExecution.status === "executed") {
+    return "Review the execution receipt and export the evidence bundle.";
+  }
+
   if (selectedProposal) {
     return operatorSummary.isExecutable
       ? `Proceed with ${selectedProposal}.`

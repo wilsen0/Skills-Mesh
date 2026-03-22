@@ -1108,6 +1108,7 @@ async function executeApplyWithIdempotency(
     proposal: string;
     plane: ExecutionPlane;
     executeRequested: boolean;
+    deferWriteFinalization?: boolean;
   },
 ): Promise<ExecutionWithRecovery> {
   if (!options.executeRequested) {
@@ -1211,7 +1212,7 @@ async function executeApplyWithIdempotency(
     const firstAttempt = executeIntent(intent, true);
     firstAttempt.attempt = 1;
     if (firstAttempt.ok) {
-      if (intent.requiresWrite && fingerprint) {
+      if (intent.requiresWrite && fingerprint && options.deferWriteFinalization !== true) {
         try {
           await markWriteIntentExecuted({
             fingerprint,
@@ -1264,6 +1265,18 @@ async function executeApplyWithIdempotency(
       const secondAttempt = executeIntent(intent, true);
       secondAttempt.attempt = 2;
       if (secondAttempt.ok) {
+        if (intent.requiresWrite && fingerprint && options.deferWriteFinalization !== true) {
+          try {
+            await markWriteIntentExecuted({
+              fingerprint,
+              remoteOrderId: parseRemoteOrderId(secondAttempt.stdout),
+            });
+          } catch (error) {
+            if (!(error instanceof IdempotencyLockError)) {
+              throw error;
+            }
+          }
+        }
         results.push(secondAttempt);
         finalResults.push(secondAttempt);
         continue;
@@ -1332,6 +1345,36 @@ function initialPlanStatus(policyDecision: PolicyDecision | undefined): RunStatu
     return "approval_required";
   }
   return "ready";
+}
+
+function buildApplyRoute(options: {
+  includePolicyGate: boolean;
+  includeApprovalGate: boolean;
+  includeReceiptVerifier: boolean;
+}): string[] {
+  return [
+    ...(options.includePolicyGate ? ["policy-gate"] : []),
+    ...(options.includeApprovalGate ? ["approval-gate"] : []),
+    "live-guard",
+    "official-executor",
+    "idempotency-gate",
+    ...(options.includeReceiptVerifier ? ["receipt-verifier"] : []),
+    "operator-summarizer",
+  ];
+}
+
+function buildRehearsalRoute(
+  baseRoute: string[],
+  options: {
+    includeReceiptVerifier: boolean;
+    includeOperatorSummary: boolean;
+  },
+): string[] {
+  return [
+    ...baseRoute,
+    ...(options.includeReceiptVerifier ? ["receipt-verifier"] : []),
+    ...(options.includeOperatorSummary ? ["operator-summarizer"] : []),
+  ];
 }
 
 export async function createPlan(goal: string, options: PlanOptions): Promise<RunRecord> {
@@ -1875,6 +1918,7 @@ export async function applyRun(runId: string, options: ApplyOptions): Promise<Ru
           proposal: proposal.name,
           plane: targetPlane,
           executeRequested: Boolean(options.execute),
+          deferWriteFinalization: options.verifyReceipt === true,
         })
       : {
           results: bundle.intents.map((intent) =>
@@ -1970,15 +2014,11 @@ export async function applyRun(runId: string, options: ApplyOptions): Promise<Ru
   });
   applyTrace.push(operatorOutput);
   const operatorSummary = artifacts.get<OperatorSummaryV3>("report.operator-summary")?.data;
-  const applyRoute = [
-    ...(baseRecord.trace.some((entry) => entry.skill === "policy-gate") ? ["policy-gate"] : []),
-    ...(approvalOutput ? ["approval-gate"] : []),
-    "live-guard",
-    "official-executor",
-    "idempotency-gate",
-    ...(options.verifyReceipt && options.execute ? ["receipt-verifier"] : []),
-    "operator-summarizer",
-  ];
+  const applyRoute = buildApplyRoute({
+    includePolicyGate: baseRecord.trace.some((entry) => entry.skill === "policy-gate"),
+    includeApprovalGate: Boolean(approvalOutput),
+    includeReceiptVerifier: options.verifyReceipt === true && options.execute === true,
+  });
   const proofTrace = await attachRouteProof({
     manifests,
     runId: baseRecord.id,
@@ -2499,15 +2539,17 @@ export async function rehearseDemo(options: RehearseOptions = {}): Promise<RunRe
     });
     fullTrace = [...fullTrace, operatorOutput];
   }
+  const rehearsalRoute = buildRehearsalRoute(graph.route, {
+    includeReceiptVerifier: options.verifyReceipt === true && options.execute === true,
+    includeOperatorSummary: Boolean(operatorManifest),
+  });
   const proofTrace = await attachRouteProof({
     manifests,
     runId,
     goal: "rehearse demo write path",
     plane: "demo",
     routeKind: "operations",
-    route: operatorManifest
-      ? [...graph.route, ...(options.verifyReceipt && options.execute ? ["receipt-verifier"] : []), "operator-summarizer"]
-      : [...graph.route, ...(options.verifyReceipt && options.execute ? ["receipt-verifier"] : [])],
+    route: rehearsalRoute,
     trace: fullTrace,
     artifacts,
     sharedState,
@@ -2519,9 +2561,6 @@ export async function rehearseDemo(options: RehearseOptions = {}): Promise<RunRe
     ],
     contractDrift: false,
   });
-  const rehearsalRoute = operatorManifest
-    ? [...graph.route, ...(options.verifyReceipt && options.execute ? ["receipt-verifier"] : []), "operator-summarizer"]
-    : [...graph.route, ...(options.verifyReceipt && options.execute ? ["receipt-verifier"] : [])];
 
   const record = hydrateRecord({
     kind: "trademesh-run",

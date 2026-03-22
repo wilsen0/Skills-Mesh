@@ -72,8 +72,8 @@ function parseArgs(args: string[]): ParsedArgs {
   return { flags, positionals };
 }
 
-function printHelp(): void {
-  console.log(`Usage:
+function helpText(): string {
+  return `Usage:
   trademesh doctor [--probe passive|active|write] [--plane research|demo|live] [--strict] [--strict-target plan|apply|execute]
   trademesh demo "<goal>" [--plane research|demo|live] [--execute] [--symbol BTC,ETH] [--max-drawdown 4] [--intent protect-downside|reduce-beta|de-risk] [--horizon intraday|swing|position] [--json]
   trademesh skills ls|list
@@ -89,7 +89,27 @@ function printHelp(): void {
   trademesh retry <run-id> [--json]
   trademesh reconcile <run-id> [--source auto|client-id|fallback] [--window-min <n>] [--until-settled] [--max-attempts <n>] [--interval-sec <n>] [--json]
   trademesh export <run-id> [--format md|json] [--output <path>] [--json]
-  trademesh apply <run-id> [--plane demo|live] [--profile demo|live] [--proposal <name>] [--approve] [--approved-by <name>] [--approval-reason <text>] [--live-confirm YES_LIVE_EXECUTION] [--max-order-usd <n>] [--max-total-usd <n>] [--execute] [--verify-receipt] [--json]`);
+  trademesh apply <run-id> [--plane demo|live] [--profile demo|live] [--proposal <name>] [--approve] [--approved-by <name>] [--approval-reason <text>] [--live-confirm YES_LIVE_EXECUTION] [--max-order-usd <n>] [--max-total-usd <n>] [--execute] [--verify-receipt] [--json]`;
+}
+
+async function writeStream(stream: NodeJS.WriteStream, text: string): Promise<void> {
+  await new Promise<void>((resolve, reject) => {
+    stream.write(text, (error) => {
+      if (error) {
+        reject(error);
+        return;
+      }
+      resolve();
+    });
+  });
+}
+
+async function writeStdout(text: string): Promise<void> {
+  await writeStream(process.stdout, `${text}\n`);
+}
+
+async function writeStderr(text: string): Promise<void> {
+  await writeStream(process.stderr, `${text}\n`);
 }
 
 function inferPlaneFromGoal(goal: string): ExecutionPlane {
@@ -294,7 +314,7 @@ async function main(): Promise<void> {
   const jsonMode = args.includes("--json");
 
   if (!command || command === "help" || command === "--help") {
-    printHelp();
+    await writeStdout(helpText());
     return;
   }
 
@@ -306,7 +326,7 @@ async function main(): Promise<void> {
       strict: parsed.flags.strict === true,
       strictTarget: readStrictTarget(parsed.flags["strict-target"]),
     });
-    console.log(jsonMode ? JSON.stringify(report, null, 2) : report.summary);
+    await writeStdout(jsonMode ? JSON.stringify(report, null, 2) : report.summary);
     if (parsed.flags.strict === true && !report.strictPass) {
       process.exitCode = 2;
     }
@@ -330,13 +350,13 @@ async function main(): Promise<void> {
       ),
     });
 
-    console.log(jsonMode ? JSON.stringify(session, null, 2) : session.summary);
+    await writeStdout(jsonMode ? JSON.stringify(session, null, 2) : session.summary);
     return;
   }
 
   if (command === "skills" && (args[1] === "ls" || args[1] === "list")) {
     const listing = await printSkillList();
-    console.log(jsonMode ? JSON.stringify(listing, null, 2) : listing.summary);
+    await writeStdout(jsonMode ? JSON.stringify(listing, null, 2) : listing.summary);
     return;
   }
 
@@ -348,14 +368,14 @@ async function main(): Promise<void> {
     }
 
     const inspection = await inspectSkill(skillName);
-    console.log(jsonMode ? JSON.stringify(inspection, null, 2) : inspection.summary);
+    await writeStdout(jsonMode ? JSON.stringify(inspection, null, 2) : inspection.summary);
     return;
   }
 
   if (command === "skills" && args[1] === "certify") {
     const parsed = parseArgs(args.slice(2));
     const certification = await certifySkills();
-    console.log(jsonMode ? JSON.stringify(certification, null, 2) : certification.summary);
+    await writeStdout(jsonMode ? JSON.stringify(certification, null, 2) : certification.summary);
     if (parsed.flags.strict === true && certification.report.failedSkills > 0) {
       process.exitCode = 2;
     }
@@ -384,19 +404,19 @@ async function main(): Promise<void> {
       allowContractDrift: parsed.flags["allow-contract-drift"] === true,
       skipSatisfied: parsed.flags["skip-satisfied"] === true,
     });
-    console.log(jsonMode ? JSON.stringify(record, null, 2) : formatRunSummary(record));
+    await writeStdout(jsonMode ? JSON.stringify(record, null, 2) : formatRunSummary(record));
     return;
   }
 
   if (command === "skills" && args[1] === "graph") {
     const graph = await describeSkillGraph();
-    console.log(jsonMode ? JSON.stringify(graph, null, 2) : graph.summary);
+    await writeStdout(jsonMode ? JSON.stringify(graph, null, 2) : graph.summary);
     return;
   }
 
   if (command === "runs" && args[1] === "list") {
     const runs = await listRuns();
-    console.log(jsonMode ? JSON.stringify(runs, null, 2) : runs.summary);
+    await writeStdout(jsonMode ? JSON.stringify(runs, null, 2) : runs.summary);
     return;
   }
 
@@ -413,7 +433,7 @@ async function main(): Promise<void> {
       goalOverrides: goalOverridesFromFlags(parsed.flags, "plan_only"),
     });
 
-    console.log(jsonMode ? JSON.stringify(record, null, 2) : formatRunSummary(record));
+    await writeStdout(jsonMode ? JSON.stringify(record, null, 2) : formatRunSummary(record));
     return;
   }
 
@@ -424,7 +444,7 @@ async function main(): Promise<void> {
       approve: parsed.flags.approve === true,
       verifyReceipt: parsed.flags["verify-receipt"] === true,
     });
-    console.log(jsonMode ? JSON.stringify(record, null, 2) : formatRunSummary(record));
+    await writeStdout(jsonMode ? JSON.stringify(record, null, 2) : formatRunSummary(record));
     return;
   }
 
@@ -435,7 +455,7 @@ async function main(): Promise<void> {
         throw new Error("replay accepts either <run-id> or --bundle <bundle.json>, not both.");
       }
       const replayed = await replayBundle(String(parsed.flags.bundle));
-      console.log(jsonMode ? JSON.stringify(replayed, null, 2) : replayed.summary);
+      await writeStdout(jsonMode ? JSON.stringify(replayed, null, 2) : replayed.summary);
       return;
     }
     const runId = parsed.positionals[0];
@@ -447,7 +467,7 @@ async function main(): Promise<void> {
     const record = await replayRun(runId, {
       skill: typeof parsed.flags.skill === "string" ? parsed.flags.skill : undefined,
     });
-    console.log(jsonMode ? JSON.stringify(record, null, 2) : formatReplay(record));
+    await writeStdout(jsonMode ? JSON.stringify(record, null, 2) : formatReplay(record));
     return;
   }
 
@@ -478,7 +498,7 @@ async function main(): Promise<void> {
       verifyReceipt: parsed.flags["verify-receipt"] === true,
     });
 
-    console.log(jsonMode ? JSON.stringify(record, null, 2) : formatRunSummary(record));
+    await writeStdout(jsonMode ? JSON.stringify(record, null, 2) : formatRunSummary(record));
     return;
   }
 
@@ -490,7 +510,7 @@ async function main(): Promise<void> {
     }
 
     const record = await retryRun(runId);
-    console.log(jsonMode ? JSON.stringify(record, null, 2) : formatRunSummary(record));
+    await writeStdout(jsonMode ? JSON.stringify(record, null, 2) : formatRunSummary(record));
     return;
   }
 
@@ -508,7 +528,7 @@ async function main(): Promise<void> {
       maxAttempts: parsePositiveInteger(parsed.flags["max-attempts"]),
       intervalSec: parsePositiveInteger(parsed.flags["interval-sec"]),
     });
-    console.log(jsonMode ? JSON.stringify(record, null, 2) : formatRunSummary(record));
+    await writeStdout(jsonMode ? JSON.stringify(record, null, 2) : formatRunSummary(record));
     return;
   }
 
@@ -523,16 +543,16 @@ async function main(): Promise<void> {
       format: parsed.flags.format === "json" ? "json" : "md",
       outputPath: typeof parsed.flags.output === "string" ? parsed.flags.output : undefined,
     });
-    console.log(jsonMode ? JSON.stringify(exported, null, 2) : exported.summary);
+    await writeStdout(jsonMode ? JSON.stringify(exported, null, 2) : exported.summary);
     return;
   }
 
-  printHelp();
+  await writeStdout(helpText());
   process.exitCode = 1;
 }
 
 main().catch((error: unknown) => {
   const message = error instanceof Error ? error.message : String(error);
-  console.error(`Error: ${message}`);
+  void writeStderr(`Error: ${message}`);
   process.exitCode = 1;
 });

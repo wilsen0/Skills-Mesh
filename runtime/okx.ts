@@ -529,12 +529,13 @@ export function executeIntent(intent: OkxCommandIntent, execute: boolean): Execu
     timeout: intent.requiresWrite ? 25_000 : 15_000,
   });
   const durationMs = Date.now() - startedAt;
+  const executionError = result.status === 0 ? undefined : result.error;
   const semanticError = result.status === 0
     ? detectOkxExecutionError(result.stdout ?? "", intent.requiresWrite)
     : null;
   const stderrParts = [result.stderr ?? ""];
-  if (result.error instanceof Error) {
-    stderrParts.push(result.error.message);
+  if (executionError instanceof Error) {
+    stderrParts.push(executionError.message);
   }
   if (semanticError) {
     stderrParts.push(semanticError);
@@ -543,7 +544,7 @@ export function executeIntent(intent: OkxCommandIntent, execute: boolean): Execu
 
   return {
     intent,
-    ok: result.status === 0 && !semanticError && !result.error,
+    ok: result.status === 0 && !semanticError,
     exitCode: result.status,
     stdout: result.stdout ?? "",
     stderr,
@@ -587,9 +588,10 @@ export function runOkxProbe(
   const durationMs = Date.now() - startedAt;
   const stdout = result.stdout ?? "";
   const stderr = result.stderr ?? "";
+  const probeError = result.status === 0 ? undefined : result.error;
 
-  if (result.error) {
-    const message = stderr || result.error.message;
+  if (probeError) {
+    const message = stderr || probeError.message;
     const reasonCode = classifyProbeReason(message);
     return {
       module,
@@ -601,7 +603,7 @@ export function runOkxProbe(
       stderr: message,
       reasonCode,
       nextActionCmd: nextActionForProbeReason(reasonCode, plane),
-      message: result.error.message,
+      message: probeError.message,
     };
   }
 

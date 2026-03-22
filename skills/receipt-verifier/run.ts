@@ -66,6 +66,33 @@ function matchedBy(outcomes: HistoryMatchOutcome[]): ReceiptVerification["matche
   return "none";
 }
 
+function aggregateVerificationStatus(
+  outcomes: HistoryMatchOutcome[],
+): ReceiptVerification["status"] {
+  const statuses = outcomes.map(verificationStatus);
+  if (statuses.every((entry) => entry === "verified")) {
+    return "verified";
+  }
+  if (statuses.some((entry) => entry === "ambiguous")) {
+    return "ambiguous";
+  }
+  if (statuses.some((entry) => entry === "failed")) {
+    return "failed";
+  }
+  return "pending";
+}
+
+function verificationNextAction(
+  runId: string,
+  status: ReceiptVerification["status"],
+  windowMin: number,
+): string {
+  if (status === "verified" || status === "not_applicable") {
+    return `node dist/bin/trademesh.js export ${runId}`;
+  }
+  return `node dist/bin/trademesh.js reconcile ${runId} --source auto --window-min ${windowMin} --until-settled --max-attempts 3 --interval-sec 5`;
+}
+
 export default async function run(context: SkillContext): Promise<SkillOutput> {
   const execution = latestExecutionFromInput(context);
   if (!execution || execution.mode !== "execute") {
@@ -73,7 +100,7 @@ export default async function run(context: SkillContext): Promise<SkillOutput> {
   }
 
   const windowMin = reconcileWindowMinutes(context);
-  const writeResults = execution.results.filter((result) => result.intent.requiresWrite);
+  const writeResults = execution.results.filter((result) => result.intent.requiresWrite && !result.skipped && !result.dryRun);
   const evidence: string[] = [];
 
   if (writeResults.length === 0) {
@@ -144,15 +171,7 @@ export default async function run(context: SkillContext): Promise<SkillOutput> {
     }
   }
 
-  const statuses = outcomes.map(verificationStatus);
-  const status: ReceiptVerification["status"] =
-    statuses.every((entry) => entry === "verified")
-      ? "verified"
-      : statuses.some((entry) => entry === "ambiguous")
-        ? "ambiguous"
-        : statuses.some((entry) => entry === "failed")
-          ? "failed"
-          : "pending";
+  const status = aggregateVerificationStatus(outcomes);
   const verification: ReceiptVerification = {
     status,
     plane: execution.plane,
@@ -160,9 +179,7 @@ export default async function run(context: SkillContext): Promise<SkillOutput> {
     checkedAt: now(),
     matchedBy: matchedBy(outcomes),
     evidence,
-    nextAction: status === "verified"
-      ? `node dist/bin/trademesh.js export ${context.runId}`
-      : `node dist/bin/trademesh.js reconcile ${context.runId} --source auto --window-min ${windowMin} --until-settled --max-attempts 3 --interval-sec 5`,
+    nextAction: verificationNextAction(context.runId, status, windowMin),
   };
 
   putArtifact(context.artifacts, {

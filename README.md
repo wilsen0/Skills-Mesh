@@ -63,6 +63,8 @@ node dist/bin/trademesh.js rehearse demo --approve --execute --verify-receipt
 node dist/bin/trademesh.js replay <run-id>
 node dist/bin/trademesh.js replay --bundle .trademesh/exports/<run-id>/bundle.json
 node dist/bin/trademesh.js export <run-id>
+pnpm demo:flow
+pnpm demo:flow -- --execute --approved-by alice
 node dist/bin/trademesh.js demo "hedge my BTC drawdown with demo first" --plane demo
 pnpm test
 ```
@@ -189,6 +191,13 @@ This makes planning more deterministic than the earlier prompt-only heuristics.
 Use this sequence for a live demo:
 
 ```bash
+pnpm demo:flow
+pnpm demo:flow -- --execute --approved-by alice
+```
+
+If you want the raw underlying commands instead of the one-command wrapper:
+
+```bash
 node dist/bin/trademesh.js doctor
 node dist/bin/trademesh.js doctor --probe active --plane demo --strict --strict-target apply
 node dist/bin/trademesh.js skills graph
@@ -200,7 +209,23 @@ node dist/bin/trademesh.js export <run-id>
 node dist/bin/trademesh.js replay --bundle .trademesh/exports/<run-id>/bundle.json
 ```
 
-If local OKX demo credentials are configured and you want the final proof point:
+`pnpm demo:flow` defaults to a dry-run supervised path:
+
+- `doctor --probe passive --strict --strict-target apply`
+- `skills certify --strict`
+- `plan`
+- `apply` dry-run
+- `export`
+- `replay --bundle`
+
+`pnpm demo:flow -- --execute --approved-by <name>` switches to verified demo execute mode:
+
+- `doctor --probe active --plane demo --strict --strict-target execute`
+- `apply --execute --verify-receipt`
+- `export`
+- `replay --bundle`
+
+If local OKX demo credentials are configured and you want the raw end-to-end proof point:
 
 ```bash
 node dist/bin/trademesh.js demo "hedge my BTC drawdown with demo first" --plane demo --execute

@@ -38,3 +38,49 @@ test("replay and export surface the same business brief first-screen fields", as
 
   await cleanupRunArtifacts(runId);
 });
+
+test("business brief does not claim receipt verification when execute was not verified", async () => {
+  const payloads = await buildReferencePayloads();
+  let runId = null;
+  const previousCorrelationCap = process.env.TRADEMESH_MAX_CORRELATION_BUCKET_PCT;
+  payloads.accountPositions = {
+    code: "0",
+    data: [
+      { instId: "BTC-USDT-SWAP", pos: "0.01", markPx: "70000", lever: "3", posSide: "long" },
+      { instId: "ETH-USDT-SWAP", pos: "0.2", markPx: "3500", lever: "3", posSide: "long" },
+      { instId: "SOL-USDT-SWAP", pos: "5", markPx: "140", lever: "3", posSide: "long" },
+      { instId: "XRP-USDT-SWAP", pos: "1400", markPx: "0.5", lever: "3", posSide: "long" },
+    ],
+  };
+  process.env.TRADEMESH_MAX_CORRELATION_BUCKET_PCT = "100";
+
+  try {
+    await withMockOkx(payloads, async () => {
+      const planned = await createPlan("hedge my BTC drawdown with demo execute", {
+        plane: "demo",
+      });
+      runId = planned.id;
+      await applyRun(planned.id, {
+        plane: "demo",
+        approve: true,
+        approvedBy: "alice",
+        execute: true,
+      });
+
+      const exported = await exportRun(planned.id);
+      const bundle = JSON.parse(await readFile(exported.bundlePath, "utf8"));
+
+      assert.equal(
+        bundle.businessBrief.recommendedAction,
+        "Review the execution receipt and export the evidence bundle.",
+      );
+    });
+  } finally {
+    if (previousCorrelationCap === undefined) {
+      delete process.env.TRADEMESH_MAX_CORRELATION_BUCKET_PCT;
+    } else {
+      process.env.TRADEMESH_MAX_CORRELATION_BUCKET_PCT = previousCorrelationCap;
+    }
+    await cleanupRunArtifacts(runId);
+  }
+});

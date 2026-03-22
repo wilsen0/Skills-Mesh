@@ -27,6 +27,7 @@
 - `skills run --bundle <bundle.json>` now supports portable rerun from export bundles
 - `rehearse demo` now runs deterministic operations rehearsal route
 - `rehearse demo --execute --verify-receipt` now verifies demo receipts immediately after execute
+- `pnpm demo:flow` now wraps doctor -> certify -> plan -> apply -> export -> replay --bundle into one operator-facing routine
 - `runs list` now shows structured run summaries
 - `reconcile <run-id>` now converges pending/ambiguous write outcomes with `--source auto|client-id|fallback` and `--window-min`
 - `reconcile --until-settled` now loops with bounded retries (`--max-attempts`, `--interval-sec`) and per-attempt evidence

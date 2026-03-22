@@ -76,6 +76,8 @@ TradeMesh 更接近以下产品，而不是聊天助手：
 典型命令如下：
 
 ```bash
+pnpm demo:flow
+pnpm demo:flow -- --execute --approved-by alice
 node dist/bin/trademesh.js doctor --probe active --plane demo
 node dist/bin/trademesh.js doctor --probe active --plane demo --strict --strict-target apply
 node dist/bin/trademesh.js skills graph

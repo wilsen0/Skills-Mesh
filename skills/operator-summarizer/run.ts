@@ -50,6 +50,59 @@ function runStatusFromInput(context: SkillContext): RunStatus {
   return "planned";
 }
 
+function collectBlockers(params: {
+  status: RunStatus;
+  execution: ExecutionRecord | null;
+  idempotencyStatus?: string;
+  receiptVerification: ReceiptVerification | null;
+  reconciliation: ReconciliationReport | null;
+}): string[] {
+  const blockers: string[] = [];
+  if (params.status === "blocked") {
+    blockers.push("policy_blocked_or_runtime_blocked");
+  }
+  if (params.status === "approval_required") {
+    blockers.push("approval_required");
+  }
+  if (params.execution?.blockedReason && params.execution.blockedReason.trim().length > 0) {
+    blockers.push(params.execution.blockedReason);
+  }
+  if (params.idempotencyStatus === "blocked_reconcile_required") {
+    blockers.push("idempotency_reconcile_required");
+  }
+  if (
+    params.receiptVerification &&
+    params.receiptVerification.status !== "verified" &&
+    params.receiptVerification.status !== "not_applicable"
+  ) {
+    blockers.push(`receipt_verification_${params.receiptVerification.status}`);
+  }
+  if (params.reconciliation && params.reconciliation.status !== "matched") {
+    blockers.push(`reconciliation_${params.reconciliation.status}`);
+  }
+  return blockers;
+}
+
+function resolveReconciliationState(params: {
+  execution: ExecutionRecord | null;
+  receiptVerification: ReceiptVerification | null;
+  reconciliation: ReconciliationReport | null;
+}): OperatorSummaryV3["reconciliation"]["state"] {
+  if (params.receiptVerification?.status === "verified") {
+    return "matched";
+  }
+  if (params.receiptVerification?.status === "ambiguous") {
+    return "ambiguous";
+  }
+  if (params.receiptVerification?.status === "failed") {
+    return "failed";
+  }
+  if (params.receiptVerification?.status === "pending") {
+    return "pending";
+  }
+  return params.execution?.reconciliationState ?? (params.reconciliation?.status ?? "none");
+}
+
 function selectedNextAction(context: SkillContext, status: RunStatus): string {
   if (typeof context.runtimeInput.nextSafeAction === "string" && context.runtimeInput.nextSafeAction.trim().length > 0) {
     return context.runtimeInput.nextSafeAction.trim();
@@ -103,35 +156,18 @@ export default async function run(context: SkillContext): Promise<SkillOutput> {
     null;
   const idempotencyCheck = context.artifacts.get<IdempotencyCheckArtifactLike>("execution.idempotency-check")?.data;
 
-  const blockers: string[] = [];
-  if (status === "blocked") {
-    blockers.push("policy_blocked_or_runtime_blocked");
-  }
-  if (status === "approval_required") {
-    blockers.push("approval_required");
-  }
-  if (execution?.blockedReason && execution.blockedReason.trim().length > 0) {
-    blockers.push(execution.blockedReason);
-  }
-  if (idempotencyCheck?.status === "blocked_reconcile_required") {
-    blockers.push("idempotency_reconcile_required");
-  }
-  if (receiptVerification && receiptVerification.status !== "verified" && receiptVerification.status !== "not_applicable") {
-    blockers.push(`receipt_verification_${receiptVerification.status}`);
-  }
-  if (reconciliation && reconciliation.status !== "matched") {
-    blockers.push(`reconciliation_${reconciliation.status}`);
-  }
-
-  const reconciliationState = receiptVerification?.status === "verified"
-    ? "matched"
-    : receiptVerification?.status === "ambiguous"
-      ? "ambiguous"
-      : receiptVerification?.status === "failed"
-        ? "failed"
-        : receiptVerification?.status === "pending"
-          ? "pending"
-          : execution?.reconciliationState ?? (reconciliation?.status ?? "none");
+  const blockers = collectBlockers({
+    status,
+    execution,
+    idempotencyStatus: idempotencyCheck?.status,
+    receiptVerification,
+    reconciliation,
+  });
+  const reconciliationState = resolveReconciliationState({
+    execution,
+    receiptVerification,
+    reconciliation,
+  });
   const requiresHumanAction =
     blockers.length > 0 ||
     reconciliationState === "pending" ||
