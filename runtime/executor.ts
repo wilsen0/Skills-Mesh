@@ -72,6 +72,7 @@ interface StandaloneOptions {
   inputArtifacts?: ArtifactSnapshot;
   skipSatisfied?: boolean;
   runtimeInputExtras?: Record<string, unknown>;
+  manifests?: SkillManifest[];
 }
 
 interface ApplyOptions {
@@ -122,6 +123,7 @@ interface ExecutionBundle {
 }
 
 interface StandaloneExecutionResult {
+  manifests: SkillManifest[];
   manifest: SkillManifest;
   runId: string;
   capabilitySnapshot: CapabilitySnapshot;
@@ -438,6 +440,26 @@ function preferredProposalName(proposals: SkillProposal[]): string | undefined {
   return proposals.find((proposal) => proposal.recommended)?.name ?? proposals[0]?.name;
 }
 
+function certificationTotals(items: SkillCertificationItem[]): {
+  passedSkills: number;
+  failedSkills: number;
+  portableSkills: number;
+  structuralSkills: number;
+  portableProofPassed: number;
+  rerunnableSkills: number;
+} {
+  const passedSkills = items.filter((item) => item.passed).length;
+  const portableSkills = items.filter((item) => item.proofClass === "portable").length;
+  return {
+    passedSkills,
+    failedSkills: items.length - passedSkills,
+    portableSkills,
+    structuralSkills: items.length - portableSkills,
+    portableProofPassed: items.filter((item) => item.proofClass === "portable" && item.proofPassed).length,
+    rerunnableSkills: items.filter((item) => item.rerunnable).length,
+  };
+}
+
 function rerunCommandTemplate(
   runId: string,
   goal: string,
@@ -525,20 +547,16 @@ function buildStaticSkillCertificationState(manifests: SkillManifest[]): SkillSt
     })
     .sort((left, right) => left.skill.localeCompare(right.skill));
 
-  const passedSkills = items.filter((item) => item.passed).length;
-  const portableSkills = items.filter((item) => item.proofClass === "portable").length;
-  const structuralSkills = items.length - portableSkills;
-  const portableProofPassed = items.filter((item) => item.proofClass === "portable" && item.proofPassed).length;
-  const rerunnableSkills = items.filter((item) => item.rerunnable).length;
+  const totals = certificationTotals(items);
   const report = {
     generatedAt: now(),
     totalSkills: items.length,
-    passedSkills,
-    failedSkills: items.length - passedSkills,
-    portableSkills,
-    structuralSkills,
-    portableProofPassed,
-    rerunnableSkills,
+    passedSkills: totals.passedSkills,
+    failedSkills: totals.failedSkills,
+    portableSkills: totals.portableSkills,
+    structuralSkills: totals.structuralSkills,
+    portableProofPassed: totals.portableProofPassed,
+    rerunnableSkills: totals.rerunnableSkills,
     items,
   };
   return {
@@ -1277,7 +1295,7 @@ export async function createPlan(goal: string, options: PlanOptions): Promise<Ru
   });
   const record = hydrateRecord({
     ...plannedRecord,
-    trace: proofTrace.trace,
+    trace: proofTrace,
     updatedAt: now(),
   });
 
@@ -1311,10 +1329,10 @@ async function attachRouteProof(params: {
   sharedState: Record<string, unknown>;
   targetOutputs: ArtifactKey[];
   skippedSteps?: ExplicitRouteSkippedStep[];
-}): Promise<{ trace: SkillOutput[]; proof?: RouteProof }> {
+}): Promise<SkillOutput[]> {
   const manifest = params.manifests.find((entry) => entry.name === "mesh-prover");
   if (!manifest) {
-    return { trace: params.trace };
+    return params.trace;
   }
 
   ensureSkillCertificationArtifact(params.manifests, params.artifacts, "mesh-prover-runtime");
@@ -1334,10 +1352,7 @@ async function attachRouteProof(params: {
     },
     sharedState: params.sharedState,
   });
-  return {
-    trace: [...baseTrace, output],
-    proof: params.artifacts.get<RouteProof>("mesh.route-proof")?.data,
-  };
+  return [...baseTrace, output];
 }
 
 async function executeStandaloneRouteInternal(
@@ -1345,7 +1360,7 @@ async function executeStandaloneRouteInternal(
   goal: string,
   options: StandaloneOptions,
 ): Promise<StandaloneExecutionResult> {
-  const manifests = await loadSkillRegistry();
+  const manifests = options.manifests ?? await loadSkillRegistry();
   const manifest = manifests.find((entry) => entry.name === skillName);
   if (!manifest) {
     throw new Error(`Skill '${skillName}' was not found in the local registry.`);
@@ -1411,6 +1426,7 @@ async function executeStandaloneRouteInternal(
   });
 
   return {
+    manifests,
     manifest,
     runId,
     capabilitySnapshot,
@@ -1428,7 +1444,7 @@ export async function runSkillStandalone(
 ): Promise<RunRecord> {
   const executed = await executeStandaloneRouteInternal(skillName, goal, options);
   const proofTrace = await attachRouteProof({
-    manifests: await loadSkillRegistry(),
+    manifests: executed.manifests,
     runId: executed.runId,
     goal,
     plane: options.plane,
@@ -1442,7 +1458,7 @@ export async function runSkillStandalone(
   });
   const record = hydrateRecord({
     ...executed.record,
-    trace: proofTrace.trace,
+    trace: proofTrace,
     updatedAt: now(),
   });
 
@@ -1784,7 +1800,7 @@ export async function applyRun(runId: string, options: ApplyOptions): Promise<Ru
     route: applyRoute,
     selectedProposal: proposal.name,
     policyDecision: effectiveDecision,
-    trace: proofTrace.trace,
+    trace: proofTrace,
     capabilitySnapshot,
     routeSummary: buildRouteSummary(baseRecord.goal, manifests, applyRoute),
     executions: [...baseRecord.executions, execution],
@@ -1968,7 +1984,7 @@ export async function reconcileRun(runId: string, options: ReconcileOptions = {}
     status: nextStatus,
     routeKind: "operations",
     route: ["reconcile-engine", "operator-summarizer"],
-    trace: proofTrace.trace,
+    trace: proofTrace,
     routeSummary: buildRouteSummary(record.goal, manifests, ["reconcile-engine", "operator-summarizer"]),
     executions: reconciledExecutions,
     operatorState: operatorSummary
@@ -2051,7 +2067,7 @@ export async function replayRun(runId: string, options: ReplayOptions = {}): Pro
     ...record,
     routeKind: "operations",
     route: operatorOutput ? ["replay", "operator-summarizer"] : ["replay"],
-    trace: proofTrace.trace,
+    trace: proofTrace,
     routeSummary: buildRouteSummary(record.goal, manifests, operatorOutput ? ["replay", "operator-summarizer"] : ["replay"]),
     operatorState: operatorSummary
       ? operatorSummary.requiresHumanAction
@@ -2229,7 +2245,7 @@ export async function rehearseDemo(options: RehearseOptions = {}): Promise<RunRe
     status,
     routeKind: "operations",
     route: rehearsalRoute,
-    trace: proofTrace.trace,
+    trace: proofTrace,
     selectedProposal: proposal.name,
     policyDecision: decision,
     capabilitySnapshot,
@@ -2798,6 +2814,7 @@ export async function certifySkills(manifestsInput?: SkillManifest[]): Promise<S
           inputArtifacts: fixtureSnapshot,
           skipSatisfied: true,
           runtimeInputExtras: proofRuntimeInputExtras(manifest),
+          manifests,
         });
         const missingOutputs = manifest.proofTargetOutputs.filter((key) => !proofRun.artifacts.has(key));
         if (missingOutputs.length > 0) {
@@ -2835,20 +2852,16 @@ export async function certifySkills(manifestsInput?: SkillManifest[]): Promise<S
       }
     }),
   );
-  const passedSkills = items.filter((item) => item.passed).length;
-  const portableSkills = items.filter((item) => item.proofClass === "portable").length;
-  const structuralSkills = items.length - portableSkills;
-  const portableProofPassed = items.filter((item) => item.proofClass === "portable" && item.proofPassed).length;
-  const rerunnableSkills = items.filter((item) => item.rerunnable).length;
+  const totals = certificationTotals(items);
   const report: SkillCertificationReport = {
     generatedAt: now(),
     totalSkills: items.length,
-    passedSkills,
-    failedSkills: items.length - passedSkills,
-    portableSkills,
-    structuralSkills,
-    portableProofPassed,
-    rerunnableSkills,
+    passedSkills: totals.passedSkills,
+    failedSkills: totals.failedSkills,
+    portableSkills: totals.portableSkills,
+    structuralSkills: totals.structuralSkills,
+    portableProofPassed: totals.portableProofPassed,
+    rerunnableSkills: totals.rerunnableSkills,
     items: [...items].sort((left, right) => left.skill.localeCompare(right.skill)),
   };
   const createdAt = now();
