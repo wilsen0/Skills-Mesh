@@ -242,7 +242,7 @@ portfolio-xray → market-scan → trade-thesis → hedge-planner → scenario-s
 - 卸载一个 skill，系统自动调整能力范围
 - 通过 `skills ls` 查看当前已安装的 skills，通过 `skills graph` 查看协作拓扑
 
-这意味着系统的能力面不是硬编码的，而是由当前安装的 skills 动态决定。今天装上 `hedge-planner`，系统就有对冲能力；明天再装上 `rebalance-planner`，系统就多了再平衡能力。用户通过 OpenClaw 对话即可触发任何已安装的 skill。
+这意味着系统的能力面不是硬编码的，而是由当前安装的 skills 动态决定。今天装上 `hedge-planner`，系统就有对冲能力；明天再装上 `rebalance-planner`，系统就多了再平衡能力。OKX Agent Trade Kit 本身也在快速演进（从 82 个工具 / 7 模块到 106 个工具 / 8 模块），热插拔机制确保系统能力可以随官方更新同步扩展。用户通过 OpenClaw 对话即可触发任何已安装的 skill。
 
 ## 8. 为什么它用 artifact，而不是 skill 之间自由对话
 
