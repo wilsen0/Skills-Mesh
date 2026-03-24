@@ -1,5 +1,7 @@
 # TradeMesh
 
+[English](./README.md) | [中文详细版](./README.zh-CN.md)
+
 > Modular trading skills for OKX — install like any skill, auto-orchestrate into workflows, trust through proof-carrying execution.
 
 [![Version](https://img.shields.io/badge/version-3.9.0-blue)]()
@@ -11,7 +13,7 @@ Most trading projects die at the same step: people can read the analysis, but no
 
 Install trading skills like you install any other skill. That is the product claim.
 
-For a detailed Chinese walkthrough, see [PROJECT-INTRODUCTION.zh-CN.md](./PROJECT-INTRODUCTION.zh-CN.md).
+For a detailed Chinese walkthrough, see [README.zh-CN.md](./README.zh-CN.md).
 For supervised operations procedures, see [docs/RUNBOOK-M2.5.md](./docs/RUNBOOK-M2.5.md).
 
 ## Architecture
@@ -216,7 +218,7 @@ trademesh replay --bundle .trademesh/exports/<run-id>/bundle.json
 
 | Document | Description |
 |----------|-------------|
-| [Product Introduction (中文)](./PROJECT-INTRODUCTION.zh-CN.md) | Full product walkthrough: positioning, architecture, safety model, user value |
+| [中文详细版](./README.zh-CN.md) | Full product walkthrough: positioning, architecture, safety model, user value |
 | [Operations Runbook](./docs/RUNBOOK-M2.5.md) | Supervised operations: doctor loop, live guard, ledger recovery, proof rerun |
 | [Trading Methodology](./docs/METHODOLOGY.md) | Knowledge layer: methodology, rules, book distillations |
 | [Progress & Roadmap](./PROGRESS.md) | Implementation status, data model, validation coverage, next milestones |
