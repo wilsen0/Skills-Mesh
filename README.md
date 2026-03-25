@@ -18,6 +18,8 @@ For supervised operations procedures, see [docs/RUNBOOK-M2.5.md](./docs/RUNBOOK-
 
 ## Architecture
 
+![Architecture](./docs/architecture.jpg)
+
 ```
 ┌─────────────────────────────────────────────────────────┐
 │                      Skill Packs                        │
