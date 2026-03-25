@@ -8,6 +8,8 @@ TradeMesh 是一组基于 OpenClaw 智能助手构建的模块化交易 skill pa
 
 ## 1. 这是什么
 
+![三层架构](./docs/architecture-zh.jpg)
+
 TradeMesh 是为 [OpenClaw](https://github.com/openclaw/openclaw)（开源 AI 私人助手平台）打造的交易能力扩展。用户不需要手动输入任何命令——只需要用自然语言告诉 OpenClaw 您的交易目标，TradeMesh 的 skills 会自动协同完成以下工作：
 
 - 理解您的目标并标准化
