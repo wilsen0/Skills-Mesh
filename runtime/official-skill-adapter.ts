@@ -1,3 +1,4 @@
+import process from "node:process";
 import { createCommandIntent } from "./okx.js";
 import { createHash } from "node:crypto";
 import type {
@@ -69,6 +70,93 @@ export function buildPlaneFlagArgs(plane: PlaneLike): string[] {
     return ["--profile", "live", "--json"];
   }
   return ["--json"];
+}
+
+// ── Payload extraction from command strings ──────────────────────────────────
+
+/**
+ * Parse a CLI command string into a structured payload object keyed by flag
+ * names.  Handles `--flag value` pairs and positional extraction for
+ * account / market modules.
+ */
+export function extractPayloadFromCommand(command: string, module: string): Record<string, unknown> {
+  const tokens = command.split(/\s+/);
+  const parsed: Record<string, string> = {};
+
+  // Extract --flag value pairs
+  for (let i = 0; i < tokens.length; i++) {
+    if (tokens[i]!.startsWith("--") && i + 1 < tokens.length && !tokens[i + 1]!.startsWith("--")) {
+      parsed[tokens[i]!.slice(2)] = tokens[i + 1]!;
+      i++;
+    }
+  }
+
+  // Enrich with positional args for account / market
+  if (module === "market") {
+    const tickerMatch = command.match(/okx\s+market\s+ticker\s+(\S+)/);
+    if (tickerMatch) {
+      parsed.symbol = tickerMatch[1]!;
+    }
+  }
+
+  if (module === "account") {
+    const accountMatch = command.match(/okx\s+account\s+(\w+)/);
+    if (accountMatch) {
+      parsed.operation = accountMatch[1]!;
+    }
+  }
+
+  // Coerce numeric-looking values
+  for (const [key, val] of Object.entries(parsed)) {
+    if (val === "true") { parsed[key] = "true" as unknown as string; continue; }
+    if (val === "false") { parsed[key] = "false" as unknown as string; continue; }
+  }
+
+  return parsed;
+}
+
+// ── Contract address resolution ──────────────────────────────────────────────
+
+export interface ContractAddressResolution {
+  /** Chain identifier, e.g. "xlayer". */
+  chain: string;
+  /** Skill method, e.g. "swap-place-order". */
+  method: string;
+  /** Resolved contract address, or undefined when not configured. */
+  address?: string;
+  /** Description of the config source for the address. */
+  source: string;
+  /** Whether a real address has been configured. */
+  configured: boolean;
+}
+
+/**
+ * Resolve a contract address for a given chain + method.
+ *
+ * Resolution order:
+ *  1. Environment variable: `SKILLS_MESH_CONTRACT_{CHAIN}_{METHOD}` (uppercased, hyphens → underscores)
+ *  2. Placeholder — no fabricated mainnet addresses.
+ */
+export function resolveContractAddress(chain: string, method: string): ContractAddressResolution {
+  const envKey = `SKILLS_MESH_CONTRACT_${chain.toUpperCase()}_${method.toUpperCase().replace(/-/g, "_")}`;
+  const envAddress = process.env[envKey];
+
+  if (typeof envAddress === "string" && envAddress.trim().length > 0) {
+    return {
+      chain,
+      method,
+      address: envAddress.trim(),
+      source: `env:${envKey}`,
+      configured: true,
+    };
+  }
+
+  return {
+    chain,
+    method,
+    source: `env:${envKey} (not set)`,
+    configured: false,
+  };
 }
 
 // ── Swap / Option command construction ───────────────────────────────────────
@@ -223,6 +311,9 @@ export function writeIntentForStep(
  * Build an OfficialSkillProfile for a single action.
  * Derives method/target/payload from the existing intent fields so the
  * profile is always consistent with the command string.
+ *
+ * The payload is parsed from the CLI command arguments; the contract
+ * address is resolved from environment config (never fabricated).
  */
 export function buildOfficialSkillProfile(
   intent: OkxCommandIntent,
@@ -241,11 +332,27 @@ export function buildOfficialSkillProfile(
   // Best-effort target extraction from command args
   const target = extractTargetFromCommand(intent.command);
 
+  // Structured payload from CLI command flags
+  const payload = extractPayloadFromCommand(intent.command, intent.module);
+
+  // Contract address resolution
+  const effectiveChain = chain ?? "xlayer";
+  const contractResolution = resolveContractAddress(effectiveChain, method);
+
+  // An action is "execution ready" when it has a real address AND a non-empty payload
+  const executionReady = contractResolution.configured
+    && Object.keys(payload).length > 0
+    && typeof contractResolution.address === "string";
+
   const profile: OfficialSkillProfile = {
     method,
     target,
+    payload,
     summary: intent.reason,
-    chain: chain ?? "xlayer",
+    chain: effectiveChain,
+    contractAddress: contractResolution.address,
+    contractSource: contractResolution.source,
+    executionReady,
   };
 
   return profile;
@@ -296,11 +403,27 @@ export function buildActionsFromIntents(
 export function buildBundleOfficialSkillProfile(
   actions: ExecutionAction[],
   chain: string,
-): { chain: string; actionCount: number; writeCount: number; readCount: number; methods: string[]; targets: string[] } {
+): {
+  chain: string;
+  actionCount: number;
+  writeCount: number;
+  readCount: number;
+  methods: string[];
+  targets: string[];
+  payloadsPopulated: boolean;
+  contractAddressesConfigured: boolean;
+} {
   const writeActions = actions.filter((a) => a.requiresWrite);
   const readActions = actions.filter((a) => !a.requiresWrite);
   const methodSet = [...new Set(actions.map((a) => a.officialSkill?.method).filter(Boolean) as string[])];
   const targetSet = [...new Set(actions.map((a) => a.officialSkill?.target).filter(Boolean) as string[])];
+
+  const allPayloadsPopulated = actions.every(
+    (a) => a.officialSkill?.payload && Object.keys(a.officialSkill.payload).length > 0,
+  );
+  const allContractsConfigured = actions
+    .filter((a) => a.requiresWrite)
+    .every((a) => a.officialSkill?.contractAddress !== undefined);
 
   return {
     chain,
@@ -309,6 +432,8 @@ export function buildBundleOfficialSkillProfile(
     readCount: readActions.length,
     methods: methodSet,
     targets: targetSet,
+    payloadsPopulated: allPayloadsPopulated,
+    contractAddressesConfigured: allContractsConfigured,
   };
 }
 

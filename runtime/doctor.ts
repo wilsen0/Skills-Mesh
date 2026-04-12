@@ -2,6 +2,7 @@ import process from "node:process";
 import { inspectOkxEnvironment, runOkxProbe } from "./okx.js";
 import { getProjectPaths } from "./paths.js";
 import { loadSkillRegistry } from "./registry.js";
+import { resolveContractAddress } from "./official-skill-adapter.js";
 import type {
   CapabilitySnapshot,
   DoctorStrictTarget,
@@ -402,6 +403,51 @@ function officialSkillStatus(
   );
 }
 
+function onchainProfileStatus(
+  skillNames: string[],
+): ProbeModuleStatus {
+  const hasExecutor = skillNames.includes("official-executor");
+  if (!hasExecutor) {
+    return moduleStatus(
+      "onchain-profile",
+      "blocked",
+      "Cannot assess onchain profile readiness without official-executor.",
+      ["Dependency: official-executor missing"],
+      "Install official-executor to enable onchain profile diagnostics.",
+    );
+  }
+
+  // Check contract address configuration for primary write methods
+  const writeMethods = ["swap-place-order", "option-place-order"];
+  const resolutions = writeMethods.map((method) => resolveContractAddress("xlayer", method));
+  const configured = resolutions.filter((r) => r.configured);
+  const unconfigured = resolutions.filter((r) => !r.configured);
+
+  const evidence: string[] = [
+    `Payload extraction: enabled (parsed from command args)`,
+    `Contract methods checked: ${writeMethods.join(", ")}`,
+    ...resolutions.map((r) => `${r.method}: ${r.configured ? `configured (${r.source})` : `not configured (${r.source})`}`),
+  ];
+
+  if (unconfigured.length === 0) {
+    return moduleStatus(
+      "onchain-profile",
+      "ready",
+      "All onchain contract addresses are configured.",
+      evidence,
+      "No action required.",
+    );
+  }
+
+  return moduleStatus(
+    "onchain-profile",
+    "degraded",
+    "Onchain contract addresses are not configured — protocol is ready but execution is placeholder-only.",
+    evidence,
+    `Set ${unconfigured.map((r) => r.source.split(" ")[0]).join(", ")} to enable real on-chain execution.`,
+  );
+}
+
 function moduleLines(modules: ProbeModuleStatus[]): string[] {
   return modules.map((entry) => `${entry.module}: ${entry.status} | ${entry.reason}`);
 }
@@ -528,6 +574,7 @@ export async function runDoctor(options: RunDoctorOptions = {}): Promise<DoctorR
     walletStatus(skillNames, probeMode),
     xlayerChainStatus(skillNames),
     officialSkillStatus(skillNames),
+    onchainProfileStatus(skillNames),
   ];
   const diagnosis: EnvironmentDiagnosis = {
     probeMode,

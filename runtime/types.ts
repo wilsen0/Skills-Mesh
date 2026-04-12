@@ -90,7 +90,8 @@ export type ProbeModuleName =
   | "write-path"
   | "agent-wallet"
   | "xlayer-chain"
-  | "official-skill";
+  | "official-skill"
+  | "onchain-profile";
 export type ProbeModuleLevel = "ready" | "degraded" | "blocked";
 export type SkillSafetyClass = "read" | "write" | "mixed";
 export type SkillDeterminism = "high" | "medium" | "low";
@@ -254,14 +255,18 @@ export interface OfficialSkillProfile {
   method: string;
   /** Target instrument / contract identifier, e.g. "BTC-USDT-SWAP". */
   target: string;
-  /** Structured parameters passed to the skill method. */
+  /** Structured parameters parsed from the CLI command for this action. */
   payload?: Record<string, unknown>;
   /** Human-readable one-line summary of what this action does. */
   summary?: string;
   /** Chain identifier for on-chain routing, e.g. "xlayer". */
   chain?: string;
-  /** Future: smart contract address on the target chain. */
+  /** Smart contract address on the target chain. Undefined when not configured. */
   contractAddress?: string;
+  /** Description of the config source for contractAddress, e.g. "env:SKILLS_MESH_CONTRACT_XLAYER_SWAP_PLACE_ORDER". */
+  contractSource?: string;
+  /** Whether this profile has all fields needed for real on-chain execution (address, payload, chain). */
+  executionReady?: boolean;
 }
 
 export interface ExecutionAction {
@@ -299,6 +304,8 @@ export interface ExecutionBundle {
     readCount: number;
     methods: string[];
     targets: string[];
+    payloadsPopulated?: boolean;
+    contractAddressesConfigured?: boolean;
   };
 }
 

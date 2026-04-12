@@ -172,6 +172,12 @@ export function validateArtifactData(key: ArtifactKey, data: unknown): void {
       if ("targets" in profile) {
         invariant(Array.isArray(profile.targets), `Artifact '${key}.officialSkillProfile.targets' must be an array.`);
       }
+      if ("payloadsPopulated" in profile) {
+        invariant(typeof profile.payloadsPopulated === "boolean", `Artifact '${key}.officialSkillProfile.payloadsPopulated' must be a boolean.`);
+      }
+      if ("contractAddressesConfigured" in profile) {
+        invariant(typeof profile.contractAddressesConfigured === "boolean", `Artifact '${key}.officialSkillProfile.contractAddressesConfigured' must be a boolean.`);
+      }
     }
     return;
   }

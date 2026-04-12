@@ -7,8 +7,10 @@ import {
   buildReadIntents,
   buildSwapPlaceOrderCommand,
   createClientOrderRef,
+  extractPayloadFromCommand,
   formatPrice,
   previewEntry,
+  resolveContractAddress,
   resolveWalletFromArtifacts,
   toNumber,
   writeIntentForStep,
@@ -223,4 +225,118 @@ test("writeIntentForStep creates option write intent", () => {
   assert.ok(intent.command.startsWith("okx option place-order"));
   assert.equal(intent.module, "option");
   assert.equal(intent.requiresWrite, true);
+});
+
+// ── extractPayloadFromCommand ────────────────────────────────────────────────
+
+test("extractPayloadFromCommand parses swap order flags", () => {
+  const payload = extractPayloadFromCommand(
+    "okx swap place-order --instId BTC-USDT-SWAP --tdMode cross --side sell --ordType limit --sz 0.03 --px 69950",
+    "swap",
+  );
+  assert.equal(payload.instId, "BTC-USDT-SWAP");
+  assert.equal(payload.tdMode, "cross");
+  assert.equal(payload.side, "sell");
+  assert.equal(payload.ordType, "limit");
+  assert.equal(payload.sz, "0.03");
+  assert.equal(payload.px, "69950");
+});
+
+test("extractPayloadFromCommand parses option order flags", () => {
+  const payload = extractPayloadFromCommand(
+    "okx option place-order --instId BTC-USD-260327-90000-P --side buy --sz 1 --px 0.05",
+    "option",
+  );
+  assert.equal(payload.instId, "BTC-USD-260327-90000-P");
+  assert.equal(payload.side, "buy");
+  assert.equal(payload.sz, "1");
+  assert.equal(payload.px, "0.05");
+});
+
+test("extractPayloadFromCommand extracts market ticker symbol from positional", () => {
+  const payload = extractPayloadFromCommand(
+    "okx market ticker BTC-USDT --profile demo --json",
+    "market",
+  );
+  assert.equal(payload.symbol, "BTC-USDT");
+  assert.equal(payload.profile, "demo");
+});
+
+test("extractPayloadFromCommand extracts account operation from positional", () => {
+  const payload = extractPayloadFromCommand(
+    "okx account balance --profile demo --json",
+    "account",
+  );
+  assert.equal(payload.operation, "balance");
+  assert.equal(payload.profile, "demo");
+});
+
+test("extractPayloadFromCommand returns empty object for empty command", () => {
+  const payload = extractPayloadFromCommand("", "unknown");
+  assert.deepStrictEqual(payload, {});
+});
+
+test("extractPayloadFromCommand handles flags at end of line gracefully", () => {
+  const payload = extractPayloadFromCommand(
+    "okx swap place-order --instId BTC-USDT-SWAP --json",
+    "swap",
+  );
+  assert.equal(payload.instId, "BTC-USDT-SWAP");
+  // --json has no value after it, so it should not be parsed as a key-value
+});
+
+// ── resolveContractAddress ───────────────────────────────────────────────────
+
+test("resolveContractAddress returns placeholder when env is not set", () => {
+  const result = resolveContractAddress("xlayer", "swap-place-order");
+  assert.equal(result.chain, "xlayer");
+  assert.equal(result.method, "swap-place-order");
+  assert.equal(result.configured, false);
+  assert.equal(result.address, undefined);
+  assert.ok(result.source.includes("SKILLS_MESH_CONTRACT_XLAYER_SWAP_PLACE_ORDER"));
+  assert.ok(result.source.includes("not set"));
+});
+
+test("resolveContractAddress returns configured address from env", () => {
+  const envKey = "SKILLS_MESH_CONTRACT_XLAYER_SWAP_PLACE_ORDER";
+  const original = process.env[envKey];
+  process.env[envKey] = "0x1234567890abcdef1234567890abcdef12345678";
+
+  try {
+    const result = resolveContractAddress("xlayer", "swap-place-order");
+    assert.equal(result.configured, true);
+    assert.equal(result.address, "0x1234567890abcdef1234567890abcdef12345678");
+    assert.equal(result.source, `env:${envKey}`);
+  } finally {
+    if (original === undefined) {
+      delete process.env[envKey];
+    } else {
+      process.env[envKey] = original;
+    }
+  }
+});
+
+// ── buildActionsFromIntents with payload/contractAddress ─────────────────────
+
+test("buildActionsFromIntents populates officialSkill.payload from command", () => {
+  const intents = buildReadIntents(["BTC"], "demo", "run_1", "test");
+  const actions = buildActionsFromIntents(intents, "0xdead", "xlayer");
+
+  // Market ticker action should have a symbol in payload
+  const tickerAction = actions.find((a) => a.module === "market");
+  assert.ok(tickerAction);
+  assert.ok(tickerAction.officialSkill);
+  assert.ok(tickerAction.officialSkill.payload);
+  assert.equal(tickerAction.officialSkill.payload.symbol, "BTC-USDT");
+});
+
+test("buildActionsFromIntents sets contractSource when no address configured", () => {
+  const intents = buildReadIntents(["BTC"], "demo", "run_1", "test");
+  const actions = buildActionsFromIntents(intents, "0xdead", "xlayer");
+
+  const action = actions[0];
+  assert.ok(action.officialSkill);
+  assert.ok(typeof action.officialSkill.contractSource === "string");
+  assert.ok(action.officialSkill.contractSource.includes("not set"));
+  assert.equal(action.officialSkill.executionReady, false);
 });
