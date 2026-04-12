@@ -151,6 +151,28 @@ export function validateArtifactData(key: ArtifactKey, data: unknown): void {
     if ("integration" in record && record.integration !== undefined) {
       invariant(typeof record.integration === "string", `Artifact '${key}.integration' must be a string.`);
     }
+    if ("officialSkillProfile" in record && record.officialSkillProfile !== undefined) {
+      const profile = asObject(record.officialSkillProfile);
+      invariant(profile, `Artifact '${key}.officialSkillProfile' must be an object.`);
+      if ("chain" in profile) {
+        invariant(typeof profile.chain === "string", `Artifact '${key}.officialSkillProfile.chain' must be a string.`);
+      }
+      if ("actionCount" in profile) {
+        invariant(typeof profile.actionCount === "number", `Artifact '${key}.officialSkillProfile.actionCount' must be a number.`);
+      }
+      if ("writeCount" in profile) {
+        invariant(typeof profile.writeCount === "number", `Artifact '${key}.officialSkillProfile.writeCount' must be a number.`);
+      }
+      if ("readCount" in profile) {
+        invariant(typeof profile.readCount === "number", `Artifact '${key}.officialSkillProfile.readCount' must be a number.`);
+      }
+      if ("methods" in profile) {
+        invariant(Array.isArray(profile.methods), `Artifact '${key}.officialSkillProfile.methods' must be an array.`);
+      }
+      if ("targets" in profile) {
+        invariant(Array.isArray(profile.targets), `Artifact '${key}.officialSkillProfile.targets' must be an array.`);
+      }
+    }
     return;
   }
 

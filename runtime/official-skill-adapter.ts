@@ -4,6 +4,8 @@ import type {
   AgentWalletIdentity,
   CommandPreviewEntry,
   ExecutionAction,
+  ExecutionBundle,
+  OfficialSkillProfile,
   OkxCommandIntent,
   OptionPlaceOrderParams,
   OrderPlanStep,
@@ -215,6 +217,52 @@ export function writeIntentForStep(
   });
 }
 
+// ── Official skill profile construction ──────────────────────────────────────
+
+/**
+ * Build an OfficialSkillProfile for a single action.
+ * Derives method/target/payload from the existing intent fields so the
+ * profile is always consistent with the command string.
+ */
+export function buildOfficialSkillProfile(
+  intent: OkxCommandIntent,
+  chain: string | undefined,
+): OfficialSkillProfile {
+  const method = intent.module === "swap"
+    ? "swap-place-order"
+    : intent.module === "option"
+      ? "option-place-order"
+      : intent.module === "account"
+        ? "account-read"
+        : intent.module === "market"
+          ? "market-read"
+          : intent.module;
+
+  // Best-effort target extraction from command args
+  const target = extractTargetFromCommand(intent.command);
+
+  const profile: OfficialSkillProfile = {
+    method,
+    target,
+    summary: intent.reason,
+    chain: chain ?? "xlayer",
+  };
+
+  return profile;
+}
+
+export function extractTargetFromCommand(command: string): string {
+  // e.g. "okx swap place-order --instId BTC-USDT-SWAP ..."
+  const instIdMatch = command.match(/--instId\s+(\S+)/);
+  if (instIdMatch) return instIdMatch[1]!;
+  // e.g. "okx market ticker BTC-USDT ..."
+  const tickerMatch = command.match(/okx\s+market\s+ticker\s+(\S+)/);
+  if (tickerMatch) return tickerMatch[1]!;
+  // e.g. "okx account balance ..."
+  if (command.includes("okx account")) return "account";
+  return "unknown";
+}
+
 // ── Actions from intents ─────────────────────────────────────────────────────
 
 export function buildActionsFromIntents(
@@ -239,7 +287,29 @@ export function buildActionsFromIntents(
     chain: chain,
     clientOrderRef: intent.clientOrderRef,
     integration: "official-skill",
+    officialSkill: buildOfficialSkillProfile(intent, chain),
   }));
+}
+
+// ── Bundle-level profile aggregation ─────────────────────────────────────────
+
+export function buildBundleOfficialSkillProfile(
+  actions: ExecutionAction[],
+  chain: string,
+): { chain: string; actionCount: number; writeCount: number; readCount: number; methods: string[]; targets: string[] } {
+  const writeActions = actions.filter((a) => a.requiresWrite);
+  const readActions = actions.filter((a) => !a.requiresWrite);
+  const methodSet = [...new Set(actions.map((a) => a.officialSkill?.method).filter(Boolean) as string[])];
+  const targetSet = [...new Set(actions.map((a) => a.officialSkill?.target).filter(Boolean) as string[])];
+
+  return {
+    chain,
+    actionCount: actions.length,
+    writeCount: writeActions.length,
+    readCount: readActions.length,
+    methods: methodSet,
+    targets: targetSet,
+  };
 }
 
 // ── Wallet / chain adapter helpers ──────────────────────────────────────────

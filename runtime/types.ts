@@ -242,6 +242,28 @@ export interface AgentWalletIdentity {
   resolvedAt: string;
 }
 
+/**
+ * Structured metadata describing an official onchain skill invocation.
+ * This is the protocol-level descriptor that replaces the flat
+ * `integration: "official-skill"` string with actionable, typed fields
+ * that downstream consumers (replay, export, future X Layer executor)
+ * can rely on without parsing command strings.
+ */
+export interface OfficialSkillProfile {
+  /** Skill method name, e.g. "swap-place-order", "option-place-order". */
+  method: string;
+  /** Target instrument / contract identifier, e.g. "BTC-USDT-SWAP". */
+  target: string;
+  /** Structured parameters passed to the skill method. */
+  payload?: Record<string, unknown>;
+  /** Human-readable one-line summary of what this action does. */
+  summary?: string;
+  /** Chain identifier for on-chain routing, e.g. "xlayer". */
+  chain?: string;
+  /** Future: smart contract address on the target chain. */
+  contractAddress?: string;
+}
+
 export interface ExecutionAction {
   actionId: string;
   stepIndex: number;
@@ -255,6 +277,8 @@ export interface ExecutionAction {
   chain?: string;
   clientOrderRef?: string;
   integration?: string;
+  /** Structured official onchain skill descriptor. Present when integration === "official-skill". */
+  officialSkill?: OfficialSkillProfile;
 }
 
 export interface ExecutionBundle {
@@ -267,6 +291,15 @@ export interface ExecutionBundle {
   wallet?: string;
   chain?: string;
   integration?: string;
+  /** Aggregate official-skill execution profile for the bundle as a whole. */
+  officialSkillProfile?: {
+    chain: string;
+    actionCount: number;
+    writeCount: number;
+    readCount: number;
+    methods: string[];
+    targets: string[];
+  };
 }
 
 export interface ApprovalTicket {

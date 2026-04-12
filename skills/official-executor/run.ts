@@ -1,6 +1,7 @@
 import { putArtifact } from "../../runtime/artifacts.js";
 import {
   buildActionsFromIntents,
+  buildBundleOfficialSkillProfile,
   buildReadIntents,
   createClientOrderRef,
   formatPrice,
@@ -150,6 +151,7 @@ export default async function run(context: SkillContext): Promise<SkillOutput> {
   // Build structured ExecutionAction entries
   const actions = buildActionsFromIntents(intents, walletAddress, chain);
   const actionPreview = actions;
+  const bundleProfile = buildBundleOfficialSkillProfile(actions, chain);
 
   const consumedArtifacts: ArtifactKey[] = ["planning.proposals", "policy.plan-decision", "trade.thesis"];
   if (walletArtifact) {
@@ -170,6 +172,7 @@ export default async function run(context: SkillContext): Promise<SkillOutput> {
       wallet: walletAddress,
       chain,
       integration: "official-skill",
+      officialSkillProfile: bundleProfile,
     },
     ruleRefs: proposal.evidence?.ruleRefs ?? thesis.ruleRefs,
     doctrineRefs: proposal.evidence?.doctrineRefs ?? thesis.doctrineRefs,
@@ -190,6 +193,7 @@ export default async function run(context: SkillContext): Promise<SkillOutput> {
       `Materialized option writes: ${counts.option}.`,
       ...walletFacts,
       `Integration: official-skill (chain: ${chain}).`,
+      `Official skill profile: ${bundleProfile.methods.length} method(s), ${bundleProfile.targets.length} target(s), ${bundleProfile.writeCount} write(s).`,
     ],
     constraints: {
       selectedProposal: proposal.name,
@@ -200,6 +204,7 @@ export default async function run(context: SkillContext): Promise<SkillOutput> {
       wallet: walletAddress ?? null,
       chain,
       integration: "official-skill",
+      officialSkillProfile: bundleProfile,
     },
     proposal: [],
     risk: {
@@ -229,6 +234,7 @@ export default async function run(context: SkillContext): Promise<SkillOutput> {
       wallet: walletAddress,
       chain,
       integration: "official-skill",
+      officialSkillProfile: bundleProfile,
     },
     timestamp: new Date().toISOString(),
   };

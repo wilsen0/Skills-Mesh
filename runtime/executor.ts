@@ -139,6 +139,14 @@ interface ExecutionBundle {
   wallet?: string;
   chain?: string;
   integration?: string;
+  officialSkillProfile?: {
+    chain: string;
+    actionCount: number;
+    writeCount: number;
+    readCount: number;
+    methods: string[];
+    targets: string[];
+  };
 }
 
 interface StandaloneExecutionResult {
@@ -3028,15 +3036,29 @@ function formatApplySummary(record: RunRecord): string {
   const wallet = (officialEntry?.metadata as { wallet?: string } | undefined)?.wallet;
   const chain = (officialEntry?.metadata as { chain?: string } | undefined)?.chain ?? "xlayer";
   const integration = (officialEntry?.metadata as { integration?: string } | undefined)?.integration ?? "official-skill";
+  const bundleProfile = (officialEntry?.metadata as { officialSkillProfile?: ExecutionBundle["officialSkillProfile"] } | undefined)?.officialSkillProfile;
   const actions = Array.isArray((officialEntry?.metadata as { actions?: unknown[] } | undefined)?.actions)
     ? (officialEntry?.metadata as { actions?: ExecutionAction[] }).actions!
     : undefined;
 
   const commandLines = actions && actions.length > 0
     ? actions.slice(0, 8).map((action) =>
-        `[action] ${action.actionId} | ${action.kind} | ${action.command}${action.wallet ? ` | wallet=${action.wallet}` : ""}${action.chain ? ` | chain=${action.chain}` : ""}`
+        `[action] ${action.actionId} | ${action.kind} | ${action.command}${action.wallet ? ` | wallet=${action.wallet}` : ""}${action.chain ? ` | chain=${action.chain}` : ""}${action.officialSkill ? ` | method=${action.officialSkill.method} target=${action.officialSkill.target}` : ""}`
       )
     : commands;
+
+  const routingLines = [
+    `Wallet: ${wallet ?? "not resolved"}`,
+    `Chain: ${chain}`,
+    `Integration: ${integration}`,
+  ];
+  if (bundleProfile) {
+    routingLines.push(
+      `Actions: ${bundleProfile.actionCount} (${bundleProfile.writeCount} write, ${bundleProfile.readCount} read)`,
+      `Methods: ${bundleProfile.methods.join(", ")}`,
+      `Targets: ${bundleProfile.targets.join(", ")}`,
+    );
+  }
 
   return [
     ...header("Apply Receipt", record),
@@ -3048,11 +3070,7 @@ function formatApplySummary(record: RunRecord): string {
     ]),
     block("Policy Verdict", policyLines(record)),
     block("Command Preview / Execution", commandLines.length > 0 ? commandLines : ["No command preview recorded."]),
-    block("Wallet / On-Chain Routing", [
-      `Wallet: ${wallet ?? "not resolved"}`,
-      `Chain: ${chain}`,
-      `Integration: ${integration}`,
-    ]),
+    block("Wallet / On-Chain Routing", routingLines),
     block("Safety Guard Summary", [
       `Execution status: ${latestExecution?.status ?? "n/a"}`,
       `Blocked reason: ${latestExecution?.blockedReason ?? "none"}`,
@@ -3479,13 +3497,14 @@ function exportReport(
   const wallet = (officialEntry?.metadata as { wallet?: string } | undefined)?.wallet;
   const chain = (officialEntry?.metadata as { chain?: string } | undefined)?.chain ?? "xlayer";
   const integration = (officialEntry?.metadata as { integration?: string } | undefined)?.integration ?? "official-skill";
+  const bundleProfile = (officialEntry?.metadata as { officialSkillProfile?: ExecutionBundle["officialSkillProfile"] } | undefined)?.officialSkillProfile;
   const actions = Array.isArray((officialEntry?.metadata as { actions?: unknown[] } | undefined)?.actions)
     ? (officialEntry?.metadata as { actions?: ExecutionAction[] }).actions!
     : undefined;
 
   const executionLines = actions && actions.length > 0
     ? actions.slice(0, 8).map((action) =>
-        `[action] ${action.actionId} | ${action.kind} | ${action.command}${action.wallet ? ` | wallet=${action.wallet}` : ""}${action.chain ? ` | chain=${action.chain}` : ""}`
+        `[action] ${action.actionId} | ${action.kind} | ${action.command}${action.wallet ? ` | wallet=${action.wallet}` : ""}${action.chain ? ` | chain=${action.chain}` : ""}${action.officialSkill ? ` | method=${action.officialSkill.method} target=${action.officialSkill.target}` : ""}`
       )
     : latestExecution
       ? latestExecution.results.map(formatExecutionResult)
@@ -3533,6 +3552,11 @@ function exportReport(
       `Wallet: ${wallet ?? "not resolved"}`,
       `Chain: ${chain}`,
       `Integration: ${integration}`,
+      ...(bundleProfile ? [
+        `Actions: ${bundleProfile.actionCount} (${bundleProfile.writeCount} write, ${bundleProfile.readCount} read)`,
+        `Methods: ${bundleProfile.methods.join(", ")}`,
+        `Targets: ${bundleProfile.targets.join(", ")}`,
+      ] : []),
     ]),
     markdownSection(
       "Command Preview / Execution Receipt",
@@ -3629,17 +3653,31 @@ export function formatReplay(record: RunRecord): string {
   const wallet = (officialEntry?.metadata as { wallet?: string } | undefined)?.wallet;
   const chain = (officialEntry?.metadata as { chain?: string } | undefined)?.chain ?? "xlayer";
   const integration = (officialEntry?.metadata as { integration?: string } | undefined)?.integration ?? "official-skill";
+  const bundleProfile = (officialEntry?.metadata as { officialSkillProfile?: ExecutionBundle["officialSkillProfile"] } | undefined)?.officialSkillProfile;
   const actions = Array.isArray((officialEntry?.metadata as { actions?: unknown[] } | undefined)?.actions)
     ? (officialEntry?.metadata as { actions?: ExecutionAction[] }).actions!
     : undefined;
 
   const executionLines = actions && actions.length > 0
     ? actions.slice(0, 8).map((action) =>
-        `[action] ${action.actionId} | ${action.kind} | ${action.command}${action.wallet ? ` | wallet=${action.wallet}` : ""}${action.chain ? ` | chain=${action.chain}` : ""}`
+        `[action] ${action.actionId} | ${action.kind} | ${action.command}${action.wallet ? ` | wallet=${action.wallet}` : ""}${action.chain ? ` | chain=${action.chain}` : ""}${action.officialSkill ? ` | method=${action.officialSkill.method} target=${action.officialSkill.target}` : ""}`
       )
     : latestExecution
       ? latestExecution.results.map(formatExecutionResult)
       : ["No execution receipt recorded."];
+
+  const routingLines = [
+    `Wallet: ${wallet ?? "not resolved"}`,
+    `Chain: ${chain}`,
+    `Integration: ${integration}`,
+  ];
+  if (bundleProfile) {
+    routingLines.push(
+      `Actions: ${bundleProfile.actionCount} (${bundleProfile.writeCount} write, ${bundleProfile.readCount} read)`,
+      `Methods: ${bundleProfile.methods.join(", ")}`,
+      `Targets: ${bundleProfile.targets.join(", ")}`,
+    );
+  }
 
   return [
     ...header("Replay Timeline", record),
@@ -3658,11 +3696,7 @@ export function formatReplay(record: RunRecord): string {
       `Policy verdict: ${record.policyDecision?.outcome ?? "none"}`,
       `Execution verdict: ${latestExecution?.status ?? "none"}`,
     ]),
-    block("Wallet / On-Chain Routing", [
-      `Wallet: ${wallet ?? "not resolved"}`,
-      `Chain: ${chain}`,
-      `Integration: ${integration}`,
-    ]),
+    block("Wallet / On-Chain Routing", routingLines),
     block("Mesh Proof", routeProofLines(meshProof ?? null)),
     ...(contractProof ? [block("Contract Proof", contractProofLines(contractProof))] : []),
     block("Timeline", timelineRaw.length > 0 ? timelineRaw : ["No replay timeline captured."]),
