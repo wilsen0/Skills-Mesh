@@ -87,7 +87,10 @@ export type ProbeModuleName =
   | "profiles"
   | "market-read"
   | "account-read"
-  | "write-path";
+  | "write-path"
+  | "agent-wallet"
+  | "xlayer-chain"
+  | "official-skill";
 export type ProbeModuleLevel = "ready" | "degraded" | "blocked";
 export type SkillSafetyClass = "read" | "write" | "mixed";
 export type SkillDeterminism = "high" | "medium" | "low";

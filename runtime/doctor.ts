@@ -299,6 +299,109 @@ function writePathStatus(
   );
 }
 
+function walletStatus(
+  skillNames: string[],
+  probeMode: ProbeMode,
+): ProbeModuleStatus {
+  const hasWalletSkill = skillNames.includes("agent-wallet");
+  if (!hasWalletSkill) {
+    return moduleStatus(
+      "agent-wallet",
+      "degraded",
+      "agent-wallet skill is not installed.",
+      ["Skill: agent-wallet missing"],
+      "Install the agent-wallet skill for on-chain wallet routing.",
+    );
+  }
+
+  const envWallet = process.env.SKILLS_MESH_AGENT_WALLET;
+  if (typeof envWallet === "string" && envWallet.trim().length > 0) {
+    return moduleStatus(
+      "agent-wallet",
+      "ready",
+      "Agent wallet resolved via environment variable.",
+      [`Env: SKILLS_MESH_AGENT_WALLET set (${envWallet.trim().slice(0, 10)}…)`],
+      "No action required.",
+    );
+  }
+
+  if (probeMode === "passive") {
+    return moduleStatus(
+      "agent-wallet",
+      "ready",
+      "agent-wallet skill is installed; will fall back to demo/research wallet at runtime.",
+      ["Skill: installed", "Env: not set (demo fallback available)"],
+      "Set SKILLS_MESH_AGENT_WALLET for live wallet routing.",
+    );
+  }
+
+  return moduleStatus(
+    "agent-wallet",
+    "ready",
+    "agent-wallet skill is installed and available.",
+    ["Skill: installed"],
+    "No action required.",
+  );
+}
+
+function xlayerChainStatus(
+  skillNames: string[],
+): ProbeModuleStatus {
+  const hasWalletSkill = skillNames.includes("agent-wallet");
+  if (!hasWalletSkill) {
+    return moduleStatus(
+      "xlayer-chain",
+      "degraded",
+      "X Layer chain routing depends on agent-wallet skill.",
+      ["Dependency: agent-wallet not installed"],
+      "Install agent-wallet skill to enable X Layer routing.",
+    );
+  }
+
+  return moduleStatus(
+    "xlayer-chain",
+    "ready",
+    "X Layer is the default chain target for on-chain routing.",
+    ["Chain: xlayer (default)"],
+    "No action required.",
+  );
+}
+
+function officialSkillStatus(
+  skillNames: string[],
+): ProbeModuleStatus {
+  const hasExecutor = skillNames.includes("official-executor");
+  if (!hasExecutor) {
+    return moduleStatus(
+      "official-skill",
+      "blocked",
+      "official-executor skill is not installed; write path unavailable.",
+      ["Skill: official-executor missing"],
+      "Install official-executor to enable the sole write path.",
+    );
+  }
+
+  const hasWallet = skillNames.includes("agent-wallet");
+  const hasAdapter = true; // official-skill-adapter is a runtime module, always available
+  const evidence: string[] = [
+    "Executor: installed",
+  ];
+  if (hasWallet) {
+    evidence.push("Wallet routing: enabled");
+  }
+  if (hasAdapter) {
+    evidence.push("Adapter: runtime module present");
+  }
+
+  return moduleStatus(
+    "official-skill",
+    "ready",
+    "Official skill adapter layer is available.",
+    evidence,
+    "No action required.",
+  );
+}
+
 function moduleLines(modules: ProbeModuleStatus[]): string[] {
   return modules.map((entry) => `${entry.module}: ${entry.status} | ${entry.reason}`);
 }
@@ -422,6 +525,9 @@ export async function runDoctor(options: RunDoctorOptions = {}): Promise<DoctorR
       "Use --probe active to run account read probes.",
     ),
     writePathStatus(probeMode, plane, capabilitySnapshot, skillNames),
+    walletStatus(skillNames, probeMode),
+    xlayerChainStatus(skillNames),
+    officialSkillStatus(skillNames),
   ];
   const diagnosis: EnvironmentDiagnosis = {
     probeMode,
