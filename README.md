@@ -1,17 +1,26 @@
-# TradeMesh
+# Skills Mesh
 
 [English](./README.md) | [中文详细版](./README.zh-CN.md)
 
-> Modular trading skills for OKX — install like any skill, auto-orchestrate into workflows, trust through proof-carrying execution.
+> **Proof-carrying reusable skill mesh for agentic onchain execution on X Layer.**
+> Install skills like plugins, compose workflows through artifact dependencies, verify every decision with cryptographic route proofs.
 
 [![Version](https://img.shields.io/badge/version-3.9.0-blue)]()
 [![Tests](https://img.shields.io/badge/tests-110%20passing-brightgreen)]()
 [![Node](https://img.shields.io/badge/node-%3E%3D22-green)]()
 [![TypeScript](https://img.shields.io/badge/lang-TypeScript%205.9-blue)]()
 
-Most trading projects die at the same step: people can read the analysis, but nobody dares deploy and reuse the execution. TradeMesh solves this by turning trading capabilities into independently installable skill modules. Each skill works standalone. Multiple skills auto-compose into complete workflows through artifact dependencies — no config, no glue code. Trust is structural: a single write path, policy gates, and proof-carrying execution make every decision replayable, verifiable, and exportable.
+**Skills Mesh** is a modular, proof-carrying skill runtime that turns onchain trading capabilities into independently installable, composable, and verifiable skill products. Each skill is a self-contained directory with a typed artifact contract. The runtime auto-discovers installed skills, compiles their dependency graph into parallel execution plans, statically verifies safety invariants before execution, and generates cryptographic Merkle DAG integrity chains — making every workflow replayable, auditable, and exportable.
 
-Install trading skills like you install any other skill. That is the product claim.
+This is not a trading script. It is a **reusable skill product** — the same infrastructure that powers the flagship hedge workflow can be extended to any onchain execution use case by installing new skill packs.
+
+**Key differentiators:**
+
+- **X Layer — native chain target.** The `agent-wallet` skill resolves wallet identity; `official-executor` enriches every action with wallet, chain (`xlayer`), and integration metadata for on-chain routing.
+- **Agentic Wallet.** Wallet-aware execution routing: skills consume `identity.agent-wallet` to make every execution intent wallet-bound and chain-aware — not just user-bound.
+- **Official skill integration.** OKX Agent Trade Kit's official skills (`market`, `trade`, `portfolio`, `bot`) serve as the execution kernel. The `official-skill-adapter` module separates command-building from orchestration, enabling any skill pack to reuse OKX CLI capabilities without duplicating code.
+- **Proof-carrying execution.** Every run produces `mesh.route-proof` — machine-verifiable evidence of what executed, what was skipped, and why the route is minimally sufficient. Export as portable `bundle.json` and replay anywhere.
+- **Structural safety.** Single write path (`official-executor`), static safety invariant verification (6 checks), approval gates, idempotency ledger, and progressive trust (`research` → `demo` → `live`).
 
 For the detailed Chinese version, see [中文详细版](./README.zh-CN.md).
 For supervised operations procedures, see [docs/RUNBOOK-M2.5.md](./docs/RUNBOOK-M2.5.md).
@@ -28,7 +37,7 @@ For supervised operations procedures, see [docs/RUNBOOK-M2.5.md](./docs/RUNBOOK-
 │  ┌──────────────┐  ┌───────────────┐  ┌──────────────┐ │
 │  │portfolio-xray│  │trade-thesis   │  │policy-gate   │ │
 │  │market-scan   │  │hedge-planner  │  │approval-gate │ │
-│  │              │  │scenario-sim   │  │live-guard    │ │
+│  │agent-wallet  │  │scenario-sim   │  │live-guard    │ │
 │  └──────────────┘  └───────────────┘  └──────────────┘ │
 │                                                         │
 │  Executor (sole write path)     Audit                   │
@@ -42,9 +51,10 @@ For supervised operations procedures, see [docs/RUNBOOK-M2.5.md](./docs/RUNBOOK-
 │  goal intake · idempotency ledger · reconcile           │
 │  route-proof · portable bundles · skill certification   │
 ├─────────────────────────────────────────────────────────┤
-│                OKX Agent Trade Kit                       │
+│             OKX Agent Trade Kit + X Layer                │
 │  okx CLI · market · trade · portfolio · bot             │
 │  (deterministic execution kernel — sole order path)     │
+│  agent-wallet identity · xlayer chain routing            │
 └─────────────────────────────────────────────────────────┘
 ```
 
@@ -52,12 +62,13 @@ For supervised operations procedures, see [docs/RUNBOOK-M2.5.md](./docs/RUNBOOK-
 
 - **Skill Packs** — Each skill is a self-contained directory. Install one for a single capability; install several and they auto-compose through artifact dependencies. The system's capability surface is defined by what's currently installed, not by hardcoded config.
 - **Skill Runtime** — The orchestration and trust layer. Compiles skill dependency graphs into parallel execution plans, statically verifies safety invariants before execution, and builds Merkle DAG integrity chains for cryptographic auditability. Also handles discovery, policy enforcement, tracing, and route proofs. No trading logic lives here.
-- **Execution Kernel** — OKX Agent Trade Kit is the only way orders reach the exchange. Local signing, permission-aware, demo/live isolation.
+- **Execution Kernel** — OKX Agent Trade Kit is the only way orders reach the exchange. The `agent-wallet` skill resolves wallet identity; `official-executor` enriches every action with wallet, chain, and integration metadata for X Layer on-chain routing. Local signing, permission-aware, demo/live isolation.
 
 ## What Makes It Different
 
 - **Install like any skill** — Each skill is a directory with a `SKILL.md` manifest. Drop it in, the runtime auto-discovers it. Remove it, the system adjusts. No config changes, no code changes, no orchestration scripts.
 - **Standalone or composed** — Every skill works independently. Install just `market-scan` for market analysis, or just `portfolio-xray` for position diagnostics. When multiple skills are present, the runtime resolves artifact dependencies and auto-composes them into workflows.
+- **Wallet-aware execution** — `agent-wallet` resolves wallet identity from runtime input, environment, or demo fallback. Every execution intent is enriched with wallet address, chain (`xlayer`), and provenance metadata — making onchain routing a first-class concern, not an afterthought.
 - **Trust through write isolation** — `official-executor` is the only module that can place orders. Custom skills read, analyze, plan — they never touch assets directly. That separation is what makes deployment and reuse safe.
 - **Proof-carrying mesh** — Every run generates `mesh.route-proof`: machine-verifiable evidence of what executed, what was skipped, and why the route is minimally sufficient. Reuse risk becomes an inspectable object, not a black box.
 - **Portable verified bundles** — Export a run as a self-contained `bundle.json` with artifact snapshots, manifest proofs, and route evidence. Replay anywhere without local state.
@@ -68,7 +79,7 @@ For supervised operations procedures, see [docs/RUNBOOK-M2.5.md](./docs/RUNBOOK-
 ```bash
 npm install && npm run build
 
-# Health check
+# Health check (includes wallet, xlayer-chain, official-skill probes)
 trademesh doctor --probe active --plane demo
 
 # Full demo flow: doctor → certify → plan → apply → export → replay
@@ -82,7 +93,7 @@ pnpm demo:flow -- --execute --approved-by alice
 
 | Command | Purpose |
 |---------|---------|
-| `doctor [--probe passive\|active\|write] [--strict]` | Environment readiness with probe receipts and machine-checkable gates |
+| `doctor [--probe passive\|active\|write] [--strict]` | Environment readiness with probe receipts, wallet & chain checks |
 | `skills ls \| graph \| certify --strict` | Mesh topology, contract verification, fixture-backed proof |
 | `plan "<goal>" --plane demo` | Ranked proposals with actionability, capability gaps, and policy preview |
 | `apply <run-id> [--execute --verify-receipt]` | Dry-run or supervised execution with approval ticket |
@@ -124,6 +135,8 @@ portfolio-xray → market-scan → trade-thesis → hedge-planner → scenario-s
 ```
 
 Each arrow is an artifact handoff — not a function call, not a prompt chain. Skills communicate through typed, versioned artifacts that are persisted, replayable, and exportable. Install a different skill pack, get a different workflow. The runtime adapts.
+
+With wallet-aware routing enabled, `agent-wallet` resolves the execution identity and `official-executor` enriches every action with X Layer chain metadata for on-chain routing.
 
 ## Safety Model
 
@@ -185,6 +198,8 @@ Output: `SafetyVerdict` with `passed`, per-invariant results, violation details,
 - **Structured goal intake** — Canonical `goal.intake` artifact normalizes symbols, drawdown targets, intent, and horizon once. Every downstream skill references the same interpretation.
 - **Portable bundle rerun** — `skills run --bundle <file>` seeds execution from an exported bundle. Manifest drift is detected automatically; blocked unless `--allow-contract-drift` is explicit.
 - **Reconcile convergence** — Bounded retry loop (`--until-settled --max-attempts N`) with per-attempt evidence, windowed matching, and multi-source fallback.
+- **Wallet-aware routing** — `agent-wallet` skill resolves wallet identity from runtime input, environment variable, or demo/research fallback. `official-executor` consumes `identity.agent-wallet` to enrich execution intents with wallet address, chain (`xlayer`), and provenance metadata.
+- **Official skill adapter** — Extracted command-building concern (`runtime/official-skill-adapter.ts`) enables any skill pack to compose OKX CLI commands without importing from the executor skill directly.
 
 ## Demo
 
