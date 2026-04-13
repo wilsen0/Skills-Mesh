@@ -273,6 +273,7 @@ Expected signal in the output:
 |----------|-------------|
 | [中文详细版](./README.zh-CN.md) | Full product walkthrough: positioning, architecture, safety model, user value |
 | [Build X Demo Script](./docs/BUILDX-DEMO-SCRIPT.md) | 90-second and 3-minute recording script for the submission demo |
+| [Build X Submission Checklist](./docs/SUBMISSION-CHECKLIST.md) | Final submission control sheet: repo, proof, video, forms, and anti-footgun checks |
 | [Operations Runbook](./docs/RUNBOOK-M2.5.md) | Supervised operations: doctor loop, live guard, ledger recovery, proof rerun |
 | [Trading Methodology](./docs/METHODOLOGY.md) | Knowledge layer: methodology, rules, book distillations |
 | [Progress & Roadmap](./PROGRESS.md) | Implementation status, data model, validation coverage, next milestones |
