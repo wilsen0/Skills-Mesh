@@ -6,27 +6,29 @@
 > 像安装插件一样安装 skill，通过 artifact 依赖自动编排工作流，用密码学路由证明验证每一次决策。
 
 [![Version](https://img.shields.io/badge/version-3.9.0-blue)]()
-[![Tests](https://img.shields.io/badge/tests-110%20passing-brightgreen)]()
+[![Tests](https://img.shields.io/badge/tests-158%20passing-brightgreen)]()
 [![Node](https://img.shields.io/badge/node-%3E%3D22-green)]()
 [![TypeScript](https://img.shields.io/badge/lang-TypeScript%205.9-blue)]()
 
-**Skills Mesh** 是一套模块化、proof-carrying 的 skill runtime，把 onchain 交易能力变成独立安装、可组合、可验证的 skill product。每个 skill 是一个自带类型化 artifact 合同的独立目录。运行时自动发现已安装 skill，将依赖图编译为并行执行计划，在执行前静态验证安全不变量，并为每个 artifact 构建密码学 Merkle DAG 完整性链——让每个工作流都可回放、可审计、可导出。
+**Skills Mesh** 是一套模块化、proof-carrying 的 skill runtime，用来构建**可验证的 onchain agent workflow**。每个 skill 都是一个自带类型化 artifact 合同的独立目录。运行时自动发现已安装 skill，将依赖图编译为并行执行计划，在执行前静态验证安全不变量，并为每个 artifact 构建密码学 Merkle DAG 完整性链——让每个工作流都可回放、可审计、可导出。
 
-这不是交易脚本。这是**可复用的 skill product**——驱动旗舰对冲工作流的基础设施，通过安装新的 skill pack 即可扩展到任何 onchain 执行场景。
+针对 Build X Season 2，当前旗舰路径已经对齐为一条 **X Layer 链上执行工作流**：分析和规划 skill 先生成 typed artifacts，`agent-wallet` 将执行绑定到 Agentic Wallet 身份，`official-executor` 则在满足条件时把 X Layer swap 写操作切到 **onchainos / DEX 执行路径**，同时保留原有单写路径安全模型。
+
+这不是一次性交易脚本，而是**可复用的 skill product**——今天可以驱动对冲工作流，明天也可以通过安装不同 skill pack 扩展为其他钱包感知的 onchain workflow。
 
 **核心差异化：**
 
-- **X Layer —— 原生链目标。** `agent-wallet` skill 解析钱包身份；`official-executor` 为每个 action 注入 wallet、chain (`xlayer`) 与集成元数据，实现 onchain 路由。
-- **Agentic Wallet。** 钱包感知的执行路由：skill 消费 `identity.agent-wallet`，使每个执行 intent 绑定钱包和链——而非仅绑定用户。
-- **Official Skill 集成。** OKX Agent Trade Kit 官方 skill（`market`、`trade`、`portfolio`、`bot`）作为执行内核。`official-skill-adapter` 模块将命令构建与编排解耦，任何 skill pack 均可复用 OKX CLI 能力而无需重复代码。
+- **X Layer —— 原生链目标。** `agent-wallet` 解析钱包身份；`official-executor` 为每个 action 注入 wallet、chain (`xlayer`) 与集成元数据，实现 onchain 路由。
+- **Agentic Wallet 绑定。** skill 消费 `identity.agent-wallet`，让执行不只是“谁发起的”，而是明确绑定“哪一个链上身份来执行”。
+- **Onchain OS 执行路径。** 对符合条件的 X Layer swap 写操作，执行器会切到 `onchainos swap execute`；其他路径则继续兼容原有 OKX-oriented 执行模型。
 - **Proof-carrying 执行。** 每次 run 产出 `mesh.route-proof`——机器可验证的执行证据，记录什么执行了、什么跳过了、为什么路由是最小充分的。可导出为便携 `bundle.json`，在任意环境回放。
-- **结构性安全。** 单一写路径（`official-executor`）、静态安全不变量验证（6 项检查）、审批门禁、幂等账本、渐进式信任（`research` → `demo` → `live`）。
+- **结构性安全。** 单一写路径（`official-executor`）、静态安全不变量验证、审批门禁、幂等账本、渐进式信任（`research` → `demo` → `live`）。
 
 ## 1. 这是什么
 
 ![三层架构](./docs/architecture-zh.jpg)
 
-Skills Mesh 是一组模块化、proof-carrying 的交易 skill pack，融合 OKX Agent Trade Kit 作为执行内核、X Layer 作为链目标、Agentic Wallet 作为身份层，让用户通过自然对话完成从目标设定到 onchain 执行的完整工作流。
+Skills Mesh 是一组模块化、proof-carrying 的 onchain skill pack：以 X Layer 作为链目标、Agentic Wallet 作为身份层，并在保留原执行安全边界的前提下，为符合条件的动作接入 onchainos / DEX 执行路径，让用户通过自然对话完成从目标设定到链上 workflow 的完整闭环。
 
 ### 三层架构，严格边界
 
@@ -126,7 +128,7 @@ Skills Mesh 把职责拆分到独立的 skill 中：
 
 > "帮我看看 BTC 的持仓风险，如果回撤超过 4%，给我一个对冲方案"
 
-OpenClaw 会自动编排 Skills Mesh skills：扫描持仓 → 分析市场 → 解析钱包身份 → 生成对冲方案 → policy 审核 → 预览执行命令（含 X Layer 路由元数据）→ 等待您确认后执行。
+OpenClaw 会自动编排 Skills Mesh skills：扫描持仓 → 分析市场 → 解析钱包身份 → 生成对冲方案 → policy 审核 → 生成执行路径（含 X Layer / wallet / integration 元数据）→ 在满足条件时切到 onchainos 执行。
 
 您还可以：
 

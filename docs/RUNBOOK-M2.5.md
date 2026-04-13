@@ -1,6 +1,6 @@
-# TradeMesh M2.8 Runbook
+# Skills Mesh M2.8 Runbook
 
-This runbook covers supervised execution operations for `v3` runtime and artifacts with M2.8 portable verified bundles and demo receipt verification.
+This runbook covers supervised execution operations for the `v3` Skills Mesh runtime and artifacts, including portable verified bundles, demo receipt verification, and the wallet-aware X Layer execution path.
 
 ## 1. Pre-Apply Execute Checklist
 
@@ -39,6 +39,7 @@ Use this when you want the standard operator-facing demo routine without manuall
    - `export`
    - `replay --bundle`
 4. `--execute` only works on `demo` plane in this wrapper.
+5. If you want to visibly verify the wallet-aware X Layer / onchainos path, use a swap proposal (for example `perp-short`) rather than an option-only proposal such as `protective-put`. Look for `Wallet: ...`, `Integration: onchainos`, and `onchainos swap execute ...` in apply output.
 
 ## 4. Reconcile Procedure
 
