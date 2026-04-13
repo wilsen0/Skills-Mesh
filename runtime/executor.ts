@@ -532,6 +532,24 @@ function preferredProposalName(proposals: SkillProposal[]): string | undefined {
   return proposals.find((proposal) => proposal.recommended)?.name ?? proposals[0]?.name;
 }
 
+function proposalRouteHint(proposalName: string | null | undefined): string | undefined {
+  if (!proposalName) {
+    return undefined;
+  }
+  if (proposalName === "perp-short" || proposalName === "de-risk") {
+    return "swap-style | useful for verifying wallet-aware X Layer / onchainos routing";
+  }
+  if (proposalName === "protective-put" || proposalName === "collar") {
+    return "option-style | useful for hedge structure review, not for proving the X Layer swap route";
+  }
+  return undefined;
+}
+
+function verificationFriendlyProposal(proposals: SkillProposal[]): string | undefined {
+  return proposals.find((proposal) => proposal.name === "perp-short" && proposal.actionable)?.name
+    ?? proposals.find((proposal) => proposal.name === "de-risk" && proposal.actionable)?.name;
+}
+
 function certificationTotals(items: SkillCertificationItem[]): {
   passedSkills: number;
   failedSkills: number;
@@ -2743,10 +2761,11 @@ function proposalLines(record: RunRecord): string[] {
       ? `score=${score.total} protect=${score.protection} cost=${score.cost} exec=${score.executionRisk} policy=${score.policyFit} data=${score.dataConfidence}`
       : "score=n/a";
     const readiness = proposal.executionReadiness ?? "unknown";
+    const routeHint = proposalRouteHint(proposal.name);
     const why = proposal.recommended
       ? proposal.reason
       : proposal.rejectionReason ?? proposal.reason;
-    return `${marker} ${proposal.name} | ${scoreText} | readiness=${readiness} actionable=${proposal.actionable ? "yes" : "no"} | ${truncate(why, 120)}`;
+    return `${marker} ${proposal.name}${routeHint ? ` (${routeHint})` : ""} | ${scoreText} | readiness=${readiness} actionable=${proposal.actionable ? "yes" : "no"} | ${truncate(why, 120)}`;
   });
 }
 
@@ -2828,9 +2847,13 @@ function routeProofLines(proof: RouteProof | null): string[] {
   }
 
   const reruns = proof.resumePoints.slice(0, 3).map((point) => `${point.skill}: ${point.rerunCommand}`);
+  const explanation = !proof.proofPassed && proof.minimality.redundantSkills.length === 1 && proof.minimality.redundantSkills[0] === "live-guard"
+    ? "Note: live-guard appears in the route for supervised safety, so this is a display/route-minimality issue rather than a wallet-routing failure."
+    : null;
   return [
     `proofPassed: ${proof.proofPassed ? "yes" : "no"}`,
     `minimality: ${proof.minimality.passed ? "passed" : "failed"} (${proof.minimality.reason})`,
+    ...(explanation ? [explanation] : []),
     `contractDrift: ${proof.contractDrift ? "yes" : "no"}`,
     `resumePoints: ${proof.resumePoints.length}`,
     ...(reruns.length > 0 ? reruns : ["rerunCommands: none"]),
@@ -3016,9 +3039,13 @@ function nextSafeAction(record: RunRecord): string[] {
   }
 
   const selectedProposal = record.selectedProposal ?? preferredProposalName(record.proposals);
+  const verificationProposal = verificationFriendlyProposal(record.proposals);
   return [
     `Preview apply: node dist/bin/trademesh.js apply ${record.id} --plane ${record.plane} --proposal ${selectedProposal ?? "<proposal>"} --approve`,
     `Execute on demo: node dist/bin/trademesh.js apply ${record.id} --plane demo --proposal ${selectedProposal ?? "<proposal>"} --approve --approved-by <name> --execute`,
+    ...(verificationProposal && verificationProposal !== selectedProposal
+      ? [`X Layer routing check: node dist/bin/trademesh.js apply ${record.id} --plane demo --proposal ${verificationProposal} --approve --approved-by <name>`]
+      : []),
   ];
 }
 

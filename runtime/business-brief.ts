@@ -33,6 +33,16 @@ function renderGoalSummary(goal: string, plane: ExecutionPlane, intake?: GoalInt
   return `${intake.normalizedGoal} | ${parts.join(" | ")}`;
 }
 
+function proposalActionHint(selectedProposal: string | null | undefined): string | null {
+  if (selectedProposal === "perp-short" || selectedProposal === "de-risk") {
+    return "This is a swap-style route and is suitable for checking wallet-aware X Layer / onchainos execution.";
+  }
+  if (selectedProposal === "protective-put" || selectedProposal === "collar") {
+    return "This is an option-style route. Use perp-short if your goal is to verify the X Layer swap / onchainos path.";
+  }
+  return null;
+}
+
 function renderRecommendedAction(
   selectedProposal: string | null | undefined,
   operatorSummary: OperatorSummaryV3,
@@ -55,9 +65,11 @@ function renderRecommendedAction(
   }
 
   if (selectedProposal) {
-    return operatorSummary.isExecutable
+    const base = operatorSummary.isExecutable
       ? `Proceed with ${selectedProposal}.`
       : `Review ${selectedProposal} and prepare the next supervised step.`;
+    const hint = proposalActionHint(selectedProposal);
+    return hint ? `${base} ${hint}` : base;
   }
   return operatorSummary.isExecutable
     ? "Proceed with the current plan."
