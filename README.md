@@ -2,25 +2,28 @@
 
 [English](./README.md) | [中文详细版](./README.zh-CN.md)
 
-> **Proof-carrying reusable skill mesh for agentic onchain execution on X Layer.**
-> Install skills like plugins, compose workflows through artifact dependencies, verify every decision with cryptographic route proofs.
+> **A proof-carrying reusable skill mesh for agentic onchain workflows on X Layer.**
+> Install skills like plugins, auto-compose them through artifact dependencies, route execution through Agentic Wallet, and verify every decision with replayable route proofs.
 
 [![Version](https://img.shields.io/badge/version-3.9.0-blue)]()
-[![Tests](https://img.shields.io/badge/tests-110%20passing-brightgreen)]()
+[![Tests](https://img.shields.io/badge/tests-158%20passing-brightgreen)]()
 [![Node](https://img.shields.io/badge/node-%3E%3D22-green)]()
 [![TypeScript](https://img.shields.io/badge/lang-TypeScript%205.9-blue)]()
 
-**Skills Mesh** is a modular, proof-carrying skill runtime that turns onchain trading capabilities into independently installable, composable, and verifiable skill products. Each skill is a self-contained directory with a typed artifact contract. The runtime auto-discovers installed skills, compiles their dependency graph into parallel execution plans, statically verifies safety invariants before execution, and generates cryptographic Merkle DAG integrity chains — making every workflow replayable, auditable, and exportable.
+**Skills Mesh** is a modular, proof-carrying skill runtime for building verifiable onchain agent workflows. Each skill is a self-contained directory with a typed artifact contract. The runtime auto-discovers installed skills, compiles their dependency graph into parallel execution plans, statically verifies safety invariants before execution, and generates cryptographic Merkle DAG integrity chains — making every workflow replayable, auditable, and exportable.
 
-This is not a trading script. It is a **reusable skill product** — the same infrastructure that powers the flagship hedge workflow can be extended to any onchain execution use case by installing new skill packs.
+For Build X Season 2, the flagship path is an **X Layer onchain execution workflow**: analysis and planning skills produce typed artifacts, `agent-wallet` binds execution to an Agentic Wallet identity, and `official-executor` routes eligible X Layer swap actions through **Onchain OS / DEX execution** while preserving the project’s single-write-path safety model.
 
-**Key differentiators:**
+This is not a one-off trading script. It is a **reusable skill product** — the same runtime can power hedge flows today and other wallet-aware onchain workflows tomorrow by installing different skill packs.
 
-- **X Layer — native chain target.** The `agent-wallet` skill resolves wallet identity; `official-executor` enriches every action with wallet, chain (`xlayer`), and integration metadata for on-chain routing.
-- **Agentic Wallet.** Wallet-aware execution routing: skills consume `identity.agent-wallet` to make every execution intent wallet-bound and chain-aware — not just user-bound.
-- **Official skill integration.** OKX Agent Trade Kit's official skills (`market`, `trade`, `portfolio`, `bot`) serve as the execution kernel. The `official-skill-adapter` module separates command-building from orchestration, enabling any skill pack to reuse OKX CLI capabilities without duplicating code.
+**Why this is interesting:**
+
+- **X Layer native execution target.** `agent-wallet` resolves wallet identity; `official-executor` enriches every action with wallet, chain (`xlayer`), and integration metadata for onchain routing.
+- **Agentic Wallet bound workflows.** Execution is wallet-aware, not just user-aware. Skills consume `identity.agent-wallet` so artifacts carry the chain identity that will actually execute.
+- **Onchain OS execution path.** Eligible X Layer swap writes can route through `onchainos swap execute`, while other paths keep the existing OKX-oriented execution model intact.
 - **Proof-carrying execution.** Every run produces `mesh.route-proof` — machine-verifiable evidence of what executed, what was skipped, and why the route is minimally sufficient. Export as portable `bundle.json` and replay anywhere.
-- **Structural safety.** Single write path (`official-executor`), static safety invariant verification (6 checks), approval gates, idempotency ledger, and progressive trust (`research` → `demo` → `live`).
+- **Structural safety.** Single write path (`official-executor`), static safety invariant verification, approval gates, idempotency ledger, and progressive trust (`research` → `demo` → `live`).
+- **Reusable skill product.** The onchain workflow is composed from installable skills and typed artifacts, not hardcoded orchestration scripts.
 
 For the detailed Chinese version, see [中文详细版](./README.zh-CN.md).
 For supervised operations procedures, see [docs/RUNBOOK-M2.5.md](./docs/RUNBOOK-M2.5.md).
@@ -201,6 +204,26 @@ Output: `SafetyVerdict` with `passed`, per-invariant results, violation details,
 - **Wallet-aware routing** — `agent-wallet` skill resolves wallet identity from runtime input, environment variable, or demo/research fallback. `official-executor` consumes `identity.agent-wallet` to enrich execution intents with wallet address, chain (`xlayer`), and provenance metadata.
 - **Official skill adapter** — Extracted command-building concern (`runtime/official-skill-adapter.ts`) enables any skill pack to compose OKX CLI commands without importing from the executor skill directly.
 
+## Build X Demo Story
+
+The strongest demo path for this repo is:
+
+1. **Plan** a supervised hedge workflow from a natural-language goal
+2. **Apply** a selected proposal on `demo`
+3. **Bind** execution to an Agentic Wallet through `agent-wallet`
+4. **Route** eligible X Layer swap actions through `onchainos`
+5. **Replay / export** the full artifact chain with route proof
+
+### Verified today
+
+- `onchainos` installed and authenticated with Agentic Wallet
+- Real X Layer swap already executed successfully outside the mesh
+- `apply` runtime now executes `agent-wallet` before `official-executor`
+- `apply --proposal perp-short` on `demo` now shows:
+  - wallet resolved
+  - `Integration: onchainos`
+  - write path switched to `onchainos swap execute ... --wallet <address>`
+
 ## Demo
 
 ```bash
@@ -228,6 +251,19 @@ trademesh replay <run-id>
 trademesh export <run-id>
 trademesh replay --bundle .trademesh/exports/<run-id>/bundle.json
 ```
+
+### X Layer / onchainos verification path
+
+```bash
+export SKILLS_MESH_AGENT_WALLET=<your_xlayer_wallet>
+trademesh apply <run-id> --plane demo --proposal perp-short --approve --approved-by alice
+```
+
+Expected signal in the output:
+
+- `Wallet: <your_xlayer_wallet>`
+- `Integration: onchainos`
+- swap write command becomes `onchainos swap execute ...`
 
 </details>
 
