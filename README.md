@@ -288,6 +288,7 @@ Expected signal in the output:
 | [Quickstart](./docs/QUICKSTART.md) | Fastest path to the first useful run: doctor → plan → apply → export → replay |
 | [Use Cases](./docs/USE-CASES.md) | Real product scenarios: when to use Skills Mesh again, and why it matters |
 | [Next Steps](./docs/NEXT-STEPS.md) | Current execution board: re-verify the product path, capture proof, improve UX, then record |
+| [Asset Capture Checklist](./docs/ASSET-CAPTURE-CHECKLIST.md) | Screenshot + recording asset checklist, plus the manual tasks to finish tomorrow |
 | [Build X Demo Script](./docs/BUILDX-DEMO-SCRIPT.md) | Proof-first demo and recording script for the core product path |
 | [Build X Submission Checklist](./docs/SUBMISSION-CHECKLIST.md) | Final submission control sheet: repo, proof, video, forms, and anti-footgun checks |
 | [Operations Runbook](./docs/RUNBOOK-M2.5.md) | Supervised operations: doctor loop, live guard, ledger recovery, proof rerun |

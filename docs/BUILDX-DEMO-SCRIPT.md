@@ -54,6 +54,8 @@ Sequence:
 
 ---
 
+See also: `docs/ASSET-CAPTURE-CHECKLIST.md` for the exact screenshots to capture before recording.
+
 ## 3. Pre-recording checklist
 
 Run these before opening screen recording:
