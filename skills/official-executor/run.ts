@@ -149,7 +149,10 @@ export default async function run(context: SkillContext): Promise<SkillOutput> {
   const counts = countByKind(orderPlan);
 
   // Build structured ExecutionAction entries
-  const actions = buildActionsFromIntents(intents, walletAddress, chain);
+  // Use onchainos DEX path when we have a wallet on X Layer
+  const useOnchainos = Boolean(walletAddress && chain === "xlayer");
+  const actions = buildActionsFromIntents(intents, walletAddress, chain, useOnchainos);
+  const integration = useOnchainos ? "onchainos" : "official-skill";
   const actionPreview = actions;
   const bundleProfile = buildBundleOfficialSkillProfile(actions, chain);
 
@@ -171,7 +174,7 @@ export default async function run(context: SkillContext): Promise<SkillOutput> {
       actionPreview,
       wallet: walletAddress,
       chain,
-      integration: "official-skill",
+      integration,
       officialSkillProfile: bundleProfile,
     },
     ruleRefs: proposal.evidence?.ruleRefs ?? thesis.ruleRefs,
@@ -192,7 +195,7 @@ export default async function run(context: SkillContext): Promise<SkillOutput> {
       `Materialized swap writes: ${counts.swap}.`,
       `Materialized option writes: ${counts.option}.`,
       ...walletFacts,
-      `Integration: official-skill (chain: ${chain}).`,
+      `Integration: ${integration} (chain: ${chain}).`,
       `Official skill profile: ${bundleProfile.methods.length} method(s), ${bundleProfile.targets.length} target(s), ${bundleProfile.writeCount} write(s).`,
     ],
     constraints: {
@@ -203,7 +206,7 @@ export default async function run(context: SkillContext): Promise<SkillOutput> {
       writeIntentCount: counts.swap + counts.option,
       wallet: walletAddress ?? null,
       chain,
-      integration: "official-skill",
+      integration,
       officialSkillProfile: bundleProfile,
     },
     proposal: [],
@@ -233,7 +236,7 @@ export default async function run(context: SkillContext): Promise<SkillOutput> {
       actionPreview,
       wallet: walletAddress,
       chain,
-      integration: "official-skill",
+      integration,
       officialSkillProfile: bundleProfile,
     },
     timestamp: new Date().toISOString(),
