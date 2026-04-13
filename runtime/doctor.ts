@@ -606,7 +606,7 @@ export async function runDoctor(options: RunDoctorOptions = {}): Promise<DoctorR
   const ok = readiness.readiness !== "cannot_execute" && (!strictEnabled || strictPass);
 
   const summary = [
-    "TradeMesh CLI Skill Mesh 2.0",
+    "Skills Mesh CLI",
     `Project root: ${paths.projectRoot}`,
     `Node: ${process.version}`,
     "",

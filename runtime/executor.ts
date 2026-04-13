@@ -2403,13 +2403,13 @@ export async function replayRun(runId: string, options: ReplayOptions = {}): Pro
 function formatBundleReplay(bundle: PortableRunBundle, contractProof: ManifestDigestProof): string {
   const meshProof = bundle.meshRouteProof ?? null;
   return [
-    "TradeMesh CLI Skill Mesh 2.0",
+    "Skills Mesh CLI",
     "Replay Timeline",
     `Run: ${bundle.runId}`,
     `Plane: ${bundle.plane} | Status: ${bundle.status} | Goal: ${bundle.goal}`,
     "",
-    block("Business Brief", businessBriefLines(bundle.businessBrief)),
-    block("Operator Brief", [
+    block("Decision Recap", businessBriefLines(bundle.businessBrief)),
+    block("Operator State", [
       `isExecutable: ${bundle.operatorBrief.isExecutable ? "yes" : "no"}`,
       `currentBlocker: ${bundle.operatorBrief.currentBlocker}`,
       `approvalState: ${bundle.operatorBrief.approvalState}`,
@@ -2718,7 +2718,7 @@ function block(title: string, lines: string[]): string {
 
 function header(title: string, record: RunRecord): string[] {
   return [
-    "TradeMesh CLI Skill Mesh 2.0",
+    "Skills Mesh CLI",
     title,
     `Run: ${record.id}`,
     `Plane: ${record.plane} | Status: ${record.status} | Goal: ${record.goal}`,
@@ -2850,10 +2850,20 @@ function policyLines(record: RunRecord): string[] {
     return ["No policy decision recorded yet."];
   }
 
+  const capabilityGaps = policy.capabilityGaps && policy.capabilityGaps.length > 0
+    ? policy.capabilityGaps.map((gap) => `[${gap.severity}] ${gap.message}`).join(" | ")
+    : "none";
+  const verdictHint = policy.outcome === "approved"
+    ? "You can continue on the current path. If the environment is still preview-only, treat this as a supervised dry-run rather than live execution."
+    : policy.outcome === "require_approval"
+      ? "The route is acceptable, but you still need explicit approval before any non-research write step."
+      : "The current route is blocked and needs a change in policy, capability, or operator input before continuing.";
+
   return [
     `Verdict: ${policy.outcome}`,
+    `What this means: ${verdictHint}`,
     `Reasons: ${policy.reasons.join(" | ") || "none"}`,
-    `Capability gaps: ${policy.capabilityGaps && policy.capabilityGaps.length > 0 ? policy.capabilityGaps.map((gap) => `[${gap.severity}] ${gap.message}`).join(" | ") : "none"}`,
+    `Capability gaps: ${capabilityGaps}`,
   ];
 }
 
@@ -2886,8 +2896,14 @@ function routeProofLines(proof: RouteProof | null): string[] {
   const explanation = !proof.proofPassed && proof.minimality.redundantSkills.length === 1 && proof.minimality.redundantSkills[0] === "live-guard"
     ? "Note: live-guard appears in the route for supervised safety, so this is a display/route-minimality issue rather than a wallet-routing failure."
     : null;
+  const recap = proof.proofPassed
+    ? "Replay confirms the exported route is internally consistent with the recorded target outputs."
+    : explanation
+      ? "Replay found a route-minimality warning, but the wallet-aware routing itself is still visible in the recorded execution path."
+      : "Replay found a route-proof issue that should be understood before treating this as a clean proof artifact.";
   return [
     `proofPassed: ${proof.proofPassed ? "yes" : "no"}`,
+    `What to take away: ${recap}`,
     `minimality: ${proof.minimality.passed ? "passed" : "failed"} (${proof.minimality.reason})`,
     ...(explanation ? [explanation] : []),
     `contractDrift: ${proof.contractDrift ? "yes" : "no"}`,
@@ -3489,7 +3505,7 @@ export async function runDemo(goal: string, options: DemoOptions): Promise<DemoS
   const replayed = await replayRun(planned.id);
 
   const summary = [
-    "TradeMesh CLI Skill Mesh 2.0 Demo",
+    "Skills Mesh CLI Demo",
     `Goal: ${goal}`,
     "",
     doctor.summary,
@@ -3598,7 +3614,7 @@ function exportReport(
       : ["No execution receipt recorded."];
 
   return [
-    `# TradeMesh Export Report`,
+    `# Skills Mesh Export Report`,
     "",
     markdownSection("Business Brief", businessBriefLines(businessBrief)),
     markdownSection("Operator Brief", [
@@ -3703,7 +3719,7 @@ export async function exportRun(runId: string, options: ExportOptions = {}): Pro
     reportPath: paths.reportPath,
     operatorSummaryPath: paths.operatorSummaryPath,
     summary: [
-      "TradeMesh Export",
+      "Skills Mesh Export",
       `Run: ${runId}`,
       `Output dir: ${paths.outputDir}`,
       `Bundle: ${paths.bundlePath}`,
@@ -3768,8 +3784,8 @@ export function formatReplay(record: RunRecord): string {
 
   return [
     ...header("Replay Timeline", record),
-    ...(businessBrief ? [block("Business Brief", businessBriefLines(businessBrief))] : []),
-    block("Operator Brief", [
+    ...(businessBrief ? [block("Decision Recap", businessBriefLines(businessBrief))] : []),
+    block("Operator State", [
       `isExecutable: ${operatorBrief?.isExecutable ? "yes" : "no"}`,
       `currentBlocker: ${operatorBrief?.currentBlocker ?? latestExecution?.blockedReason ?? "none"}`,
       `approvalState: ${operatorBrief?.approvalState ?? (operatorSummary?.approval.ticketId ? "approved" : "missing")}`,
