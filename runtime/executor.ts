@@ -1701,6 +1701,7 @@ export async function applyRun(runId: string, options: ApplyOptions): Promise<Ru
   }
   const manifests = await loadSkillRegistry();
   const executorManifest = manifests.find((manifest) => manifest.name === "official-executor");
+  const agentWalletManifest = manifests.find((manifest) => manifest.name === "agent-wallet");
   const approvalManifest = manifests.find((manifest) => manifest.name === "approval-gate");
   const liveGuardManifest = manifests.find((manifest) => manifest.name === "live-guard");
   const idempotencyGateManifest = manifests.find((manifest) => manifest.name === "idempotency-gate");
@@ -1708,6 +1709,9 @@ export async function applyRun(runId: string, options: ApplyOptions): Promise<Ru
   const operatorManifest = manifests.find((manifest) => manifest.name === "operator-summarizer");
   if (!executorManifest) {
     throw new Error("No official-executor skill installed");
+  }
+  if (!agentWalletManifest) {
+    throw new Error("No agent-wallet skill installed. Apply path requires wallet identity routing.");
   }
   if (options.execute && !approvalManifest) {
     throw new Error("No approval-gate skill installed. Write execution requires approval ticket lifecycle.");
@@ -1878,6 +1882,20 @@ export async function applyRun(runId: string, options: ApplyOptions): Promise<Ru
     };
     syncApplyDecisionArtifacts(effectiveDecision);
   }
+
+  const agentWalletOutput = await executeSkill(agentWalletManifest, {
+    runId: baseRecord.id,
+    goal: baseRecord.goal,
+    plane: targetPlane,
+    manifests,
+    trace: applyTrace,
+    artifacts,
+    runtimeInput: {
+      selectedProposal: proposal.name,
+    },
+    sharedState,
+  });
+  applyTrace.push(agentWalletOutput);
 
   const executorOutput = await executeSkill(executorManifest, {
     runId: baseRecord.id,
