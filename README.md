@@ -26,6 +26,8 @@ This is not a one-off trading script. It is a **reusable skill product** — the
 - **Reusable skill product.** The onchain workflow is composed from installable skills and typed artifacts, not hardcoded orchestration scripts.
 
 For the detailed Chinese version, see [中文详细版](./README.zh-CN.md).
+For the fastest first successful run, see [docs/QUICKSTART.md](./docs/QUICKSTART.md).
+For real product scenarios, see [docs/USE-CASES.md](./docs/USE-CASES.md).
 For supervised operations procedures, see [docs/RUNBOOK-M2.5.md](./docs/RUNBOOK-M2.5.md).
 
 ## Architecture
@@ -272,6 +274,8 @@ Expected signal in the output:
 | Document | Description |
 |----------|-------------|
 | [中文详细版](./README.zh-CN.md) | Full product walkthrough: positioning, architecture, safety model, user value |
+| [Quickstart](./docs/QUICKSTART.md) | Fastest path to the first useful run: doctor → plan → apply → export → replay |
+| [Use Cases](./docs/USE-CASES.md) | Real product scenarios: when to use Skills Mesh again, and why it matters |
 | [Build X Demo Script](./docs/BUILDX-DEMO-SCRIPT.md) | 90-second and 3-minute recording script for the submission demo |
 | [Build X Submission Checklist](./docs/SUBMISSION-CHECKLIST.md) | Final submission control sheet: repo, proof, video, forms, and anti-footgun checks |
 | [Operations Runbook](./docs/RUNBOOK-M2.5.md) | Supervised operations: doctor loop, live guard, ledger recovery, proof rerun |
