@@ -300,6 +300,49 @@ Expected signal in the output:
 
 </details>
 
+## Onchain OS Skill Usage
+
+X-Matrix integrates **Onchain OS Skill** as the on-chain execution layer for X Layer swap operations:
+
+1. **Agentic Wallet Binding** — `agent-wallet` skill resolves an X Layer wallet address from environment variable `SKILLS_MESH_AGENT_WALLET`. This wallet serves as the project's on-chain identity for all write operations.
+
+2. **Swap Routing** — When `official-executor` determines an action is eligible for on-chain execution (X Layer swap), it routes through Onchain OS / DEX integration:
+   - Wallet: `0x2dcb...eaf7e` (Agentic Wallet on X Layer)
+   - Chain: `xlayer`
+   - Actions are enriched with wallet address, chain metadata, and integration provenance
+
+3. **Proof Chain** — Every on-chain action generates `mesh.route-proof` artifacts that record what was routed on-chain vs off-chain, making the X Layer interaction auditable and replayable.
+
+**Verified in demo** (see screenshots above): `apply --plane demo` successfully resolves the Agentic Wallet, routes through X Layer, and produces verified route proofs.
+
+## Deployment
+
+| Component | Address / Status |
+|-----------|-----------------|
+| GitHub Repository | https://github.com/wilsen0/Skills-Mesh |
+| Agentic Wallet (X Layer) | `0x2dcb...eaf7e` |
+| Chain Target | X Layer (mainnet) |
+| Execution API | OKX V5 REST API (live authenticated) |
+| Demo Plane | Fully operational with real market data |
+| Live Plane | Authenticated with real API credentials |
+
+## Team
+
+| Member | Role |
+|--------|------|
+| **Wilsen** | Architecture, design & implementation — sole developer |
+
+Single-agent architecture: X-Matrix is a self-contained skill runtime. Only one Agentic Wallet identity is deployed, binding all skills to a unified on-chain persona.
+
+## X Layer Ecosystem Positioning
+
+X-Matrix positions itself as a **reusable on-chain skill infrastructure** within the X Layer ecosystem:
+
+- **Not a one-off trading bot.** X-Matrix is a runtime that composes installable skills into verifiable on-chain workflows. Today it drives hedge flows; tomorrow it can power any wallet-aware X Layer workflow by swapping skill packs.
+- **Proof-carrying by design.** Every X Layer interaction is captured in a Merkle DAG integrity chain — making on-chain actions auditable without trusting the operator.
+- **Agentic Wallet native.** Wallet identity is a first-class artifact, not a config afterthought. Skills consume `identity.agent-wallet` and produce wallet-aware execution intents.
+- **Progressive trust for X Layer.** `research` → `demo` → `live` with independent safety gates, enabling safe experimentation on X Layer before committing real assets.
+
 ## Documentation
 
 | Document | Description |

@@ -318,6 +318,49 @@ X-Matrix 是面向 onchain 执行的模块化 skill runtime。它不是一个独
 
 > X-Matrix：面向 X Layer 的 proof-carrying 可复用技能网格。像装插件一样装 skill，用密码学证明验证每一次执行。
 
+## Onchain OS Skill 使用说明
+
+X-Matrix 集成 **Onchain OS Skill** 作为 X Layer swap 操作的链上执行层：
+
+1. **Agentic Wallet 绑定** — `agent-wallet` skill 从环境变量 `SKILLS_MESH_AGENT_WALLET` 解析 X Layer 钱包地址，作为项目所有写操作的链上身份。
+
+2. **Swap 路由** — 当 `official-executor` 判定一个操作符合链上执行条件（X Layer swap）时，通过 Onchain OS / DEX 集成层路由：
+   - Wallet: `0x2dcb...eaf7e`（X Layer 上的 Agentic Wallet）
+   - Chain: `xlayer`
+   - 每个 action 注入钱包地址、链元数据、集成来源信息
+
+3. **证明链** — 每次链上操作生成 `mesh.route-proof` artifact，记录哪些走链上、哪些走链下，使 X Layer 交互可审计、可回放。
+
+**已验证**（见上方截图）：`apply --plane demo` 成功解析 Agentic Wallet、路由到 X Layer、生成已验证的路由证明。
+
+## 部署信息
+
+| 组件 | 地址 / 状态 |
+|------|-------------|
+| GitHub 仓库 | https://github.com/wilsen0/Skills-Mesh |
+| Agentic Wallet（X Layer） | `0x2dcb...eaf7e` |
+| 链目标 | X Layer（主网） |
+| 执行 API | OKX V5 REST API（已认证实盘） |
+| Demo Plane | 全功能运行，接入真实行情 |
+| Live Plane | 已认证，接入实盘 API |
+
+## 团队
+
+| 成员 | 角色 |
+|------|------|
+| **Wilsen** | 架构设计 & 全部实现 — 独立开发者 |
+
+单 Agent 架构：X-Matrix 是自包含的 skill runtime，仅部署一个 Agentic Wallet 身份，将所有 skill 绑定到统一的链上身份。
+
+## X Layer 生态定位
+
+X-Matrix 在 X Layer 生态中定位为**可复用的链上 skill 基础设施**：
+
+- **不是一次性交易机器人。** X-Matrix 是一个 runtime，将可安装的 skill 组合为可验证的链上 workflow。今天驱动对冲流程，明天换 skill pack 即可扩展为其他钱包感知的 X Layer workflow。
+- **Proof-carrying 设计。** 每次 X Layer 交互都记录在 Merkle DAG 完整性链中——链上操作可审计，无需信任运营者。
+- **Agentic Wallet 原生。** 钱包身份是一等 artifact，不是配置补充。Skill 消费 `identity.agent-wallet`，产出钱包感知的执行 intent。
+- **X Layer 渐进式信任。** `research` → `demo` → `live`，独立安全门禁，在 X Layer 上安全实验后再投入真实资产。
+
 ## License
 
 MIT
