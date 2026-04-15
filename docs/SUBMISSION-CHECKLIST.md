@@ -1,4 +1,4 @@
-# Skills Mesh — Build X Submission Checklist
+# X-Matrix — Build X Submission Checklist
 
 Use this as the final submission control sheet.
 
@@ -10,11 +10,11 @@ Goal: make sure the Build X submission is not just technically strong, but also 
 
 ### One-line positioning
 
-> Skills Mesh is a proof-carrying reusable skill runtime for agentic onchain workflows on X Layer.
+> X-Matrix is a proof-carrying reusable skill runtime for agentic onchain workflows on X Layer.
 
 ### Short submission pitch
 
-> Skills Mesh turns installable agent skills into verifiable onchain workflows.  
+> X-Matrix turns installable agent skills into verifiable onchain workflows.  
 > In the Build X version, analysis and planning skills produce typed artifacts, `agent-wallet` binds execution to an Agentic Wallet identity, and `official-executor` routes eligible X Layer swap actions through `onchainos`, while keeping a supervised single-write-path safety model.  
 > Every workflow is replayable, exportable, and backed by route proof.
 
@@ -23,7 +23,7 @@ Goal: make sure the Build X submission is not just technically strong, but also 
 ## 1. Repo and docs readiness
 
 - [ ] README first screen is competition-facing
-- [ ] README uses **Skills Mesh** naming consistently
+- [ ] README uses **X-Matrix** naming consistently
 - [ ] README foregrounds:
   - [ ] X Layer
   - [ ] Agentic Wallet
@@ -31,7 +31,7 @@ Goal: make sure the Build X submission is not just technically strong, but also 
   - [ ] replay / export / proof
 - [ ] README demo commands are still valid
 - [ ] README.zh-CN is aligned with English positioning
-- [ ] RUNBOOK naming is aligned with Skills Mesh branding
+- [ ] RUNBOOK naming is aligned with X-Matrix branding
 - [ ] `docs/BUILDX-DEMO-SCRIPT.md` is present and usable
 - [ ] No embarrassing wording remains:
   - [ ] “legacy”
@@ -104,7 +104,7 @@ Fill these before final submission:
 - [ ] 95-115s: point to `Wallet` + `Integration: onchainos`
 - [ ] 115-140s: `export`
 - [ ] 140-170s: `replay --bundle`
-- [ ] final line: what makes Skills Mesh different
+- [ ] final line: what makes X-Matrix different
 
 ### C. Spoken message consistency
 
@@ -160,7 +160,7 @@ Before filling the final form:
 ### Recommended narrative for forms
 
 - Track: **Human Track / Skills Arena**
-- Product label: **Skills Mesh**
+- Product label: **X-Matrix**
 - Category framing: reusable agent skill runtime + onchain workflow execution + verifiable proof
 
 ---

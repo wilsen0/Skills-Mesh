@@ -1,4 +1,4 @@
-# Skills Mesh Quickstart
+# X-Matrix Quickstart
 
 This guide is for the first successful run.
 
@@ -128,7 +128,7 @@ Usually you want:
 node dist/bin/trademesh.js replay --bundle .trademesh/exports/<run-id>/bundle.json
 ```
 
-This is where Skills Mesh becomes more than a one-shot agent.
+This is where X-Matrix becomes more than a one-shot agent.
 You can inspect the route again, prove what happened, and carry the result to another environment.
 
 ---
@@ -188,4 +188,4 @@ That is already useful even before live execution.
 
 ## 10. If you only keep one sentence
 
-Skills Mesh is useful when you want a chain of risk-aware decisions to be **structured, supervised, and replayable** instead of disappearing into a chat log.
+X-Matrix is useful when you want a chain of risk-aware decisions to be **structured, supervised, and replayable** instead of disappearing into a chat log.

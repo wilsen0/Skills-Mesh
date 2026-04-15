@@ -2403,7 +2403,7 @@ export async function replayRun(runId: string, options: ReplayOptions = {}): Pro
 function formatBundleReplay(bundle: PortableRunBundle, contractProof: ManifestDigestProof): string {
   const meshProof = bundle.meshRouteProof ?? null;
   return [
-    "Skills Mesh CLI",
+    "X-Matrix CLI",
     "Replay Timeline",
     `Run: ${bundle.runId}`,
     `Plane: ${bundle.plane} | Status: ${bundle.status} | Goal: ${bundle.goal}`,
@@ -2718,7 +2718,7 @@ function block(title: string, lines: string[]): string {
 
 function header(title: string, record: RunRecord): string[] {
   return [
-    "Skills Mesh CLI",
+    "X-Matrix CLI",
     title,
     `Run: ${record.id}`,
     `Plane: ${record.plane} | Status: ${record.status} | Goal: ${record.goal}`,
@@ -3472,7 +3472,7 @@ export async function describeSkillGraph(): Promise<{ graph: SkillGraphView; sum
   const manifests = await loadSkillRegistry();
   const graph = buildSkillGraphView(manifests);
   const summary = [
-    "TradeMesh Skill Mesh Graph",
+    "TradeMesh X-Matrix Graph",
     `Flagship route: ${graph.flagshipRoute.join(" -> ") || "n/a"}`,
     "",
     block("Nodes", graph.nodes.map((node) =>
@@ -3505,7 +3505,7 @@ export async function runDemo(goal: string, options: DemoOptions): Promise<DemoS
   const replayed = await replayRun(planned.id);
 
   const summary = [
-    "Skills Mesh CLI Demo",
+    "X-Matrix CLI Demo",
     `Goal: ${goal}`,
     "",
     doctor.summary,
@@ -3614,7 +3614,7 @@ function exportReport(
       : ["No execution receipt recorded."];
 
   return [
-    `# Skills Mesh Export Report`,
+    `# X-Matrix Export Report`,
     "",
     markdownSection("Business Brief", businessBriefLines(businessBrief)),
     markdownSection("Operator Brief", [
@@ -3719,7 +3719,7 @@ export async function exportRun(runId: string, options: ExportOptions = {}): Pro
     reportPath: paths.reportPath,
     operatorSummaryPath: paths.operatorSummaryPath,
     summary: [
-      "Skills Mesh Export",
+      "X-Matrix Export",
       `Run: ${runId}`,
       `Output dir: ${paths.outputDir}`,
       `Bundle: ${paths.bundlePath}`,

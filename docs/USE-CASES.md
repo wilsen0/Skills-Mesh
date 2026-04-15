@@ -1,8 +1,8 @@
-# Skills Mesh Use Cases
+# X-Matrix Use Cases
 
 This document answers one product question:
 
-> When would I actually open Skills Mesh and use it again?
+> When would I actually open X-Matrix and use it again?
 
 If the answer is only “for a demo”, the product is not done.
 
@@ -10,7 +10,7 @@ If the answer is only “for a demo”, the product is not done.
 
 ## Core product value
 
-Skills Mesh is useful when you need a risky onchain decision flow to be:
+X-Matrix is useful when you need a risky onchain decision flow to be:
 
 - **structured** instead of improvised
 - **supervised** instead of blindly automated
@@ -31,7 +31,7 @@ You hold BTC or ETH and feel exposed, but do not want to improvise under emotion
 
 > Protect BTC downside with 4% max drawdown.
 
-### What Skills Mesh gives you
+### What X-Matrix gives you
 
 - normalized goal intake
 - portfolio and market context
@@ -56,7 +56,7 @@ You think you want to hedge, but you do not want your first look at the route to
 
 Run the workflow on `demo` first.
 
-### What Skills Mesh gives you
+### What X-Matrix gives you
 
 - environment readiness checks
 - proposal comparison
@@ -80,7 +80,7 @@ You want to know whether the system is just talking about onchain execution, or 
 
 Use a swap-style proposal such as `perp-short`.
 
-### What Skills Mesh gives you
+### What X-Matrix gives you
 
 Visible routing signals such as:
 
@@ -106,7 +106,7 @@ You already made the call, but later you need to answer:
 - what was blocked?
 - what route produced this outcome?
 
-### What Skills Mesh gives you
+### What X-Matrix gives you
 
 - replay
 - export
@@ -117,7 +117,7 @@ You already made the call, but later you need to answer:
 ### Why this matters
 
 Most agents are useful only in the moment.
-Skills Mesh is useful before, during, and after the decision.
+X-Matrix is useful before, during, and after the decision.
 
 ---
 
@@ -127,7 +127,7 @@ Skills Mesh is useful before, during, and after the decision.
 
 You do not want a one-off script for each new strategy or workflow.
 
-### What Skills Mesh gives you
+### What X-Matrix gives you
 
 - installable skills
 - typed artifact handoffs
@@ -148,7 +148,7 @@ The product value is a reusable framework for wallet-aware onchain workflows.
 
 A lot of “AI tools” feel helpful in the moment, then become impossible to inspect later.
 
-### What Skills Mesh gives you
+### What X-Matrix gives you
 
 - explicit artifacts
 - route-level traceability
@@ -161,7 +161,7 @@ This is a product for people who care about operational memory, not just flashy 
 
 ---
 
-## What Skills Mesh is good for right now
+## What X-Matrix is good for right now
 
 Today, the strongest practical uses are:
 
@@ -175,7 +175,7 @@ Today, the strongest practical uses are:
 
 ## What it is not trying to be
 
-Skills Mesh is **not** trying to be:
+X-Matrix is **not** trying to be:
 
 - a casual trading toy
 - a one-click fully autonomous money machine
@@ -192,7 +192,7 @@ A good product test is:
 
 > Would I still want this if nobody were scoring the demo?
 
-For Skills Mesh, the answer should be yes if you care about:
+For X-Matrix, the answer should be yes if you care about:
 
 - safer decision flow
 - auditability

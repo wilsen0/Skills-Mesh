@@ -1,8 +1,8 @@
-# Skills Mesh Demo Script
+# X-Matrix Demo Script
 
 This document is the operator-facing demo and recording script.
 
-Goal: verify and show the core product path of Skills Mesh — not just a strategy clip, but a **reusable proof-carrying skill product** for **agentic onchain workflows on X Layer**.
+Goal: verify and show the core product path of X-Matrix — not just a strategy clip, but a **reusable proof-carrying skill product** for **agentic onchain workflows on X Layer**.
 
 ---
 
@@ -89,7 +89,7 @@ node dist/bin/trademesh.js doctor --probe active --plane demo --strict --strict-
 
 What to say:
 
-> We start with a health and readiness check. Skills Mesh verifies environment readiness before execution and keeps progressive trust boundaries between research, demo, and live.
+> We start with a health and readiness check. X-Matrix verifies environment readiness before execution and keeps progressive trust boundaries between research, demo, and live.
 
 ---
 
@@ -184,7 +184,7 @@ Look for:
 
 ## 5. Suggested spoken track (short version)
 
-> Skills Mesh is a reusable proof-carrying skill runtime for onchain agent workflows on X Layer.  
+> X-Matrix is a reusable proof-carrying skill runtime for onchain agent workflows on X Layer.  
 > We start from a natural-language risk goal.  
 > Installed skills auto-compose into a typed workflow through artifact dependencies.  
 > On apply, the agent-wallet skill binds execution to an Agentic Wallet identity.  
@@ -221,4 +221,4 @@ The core story is:
 
 ## 8. Strong finishing line
 
-> Skills Mesh turns reusable agent skills into verifiable onchain workflows on X Layer — with wallet-bound execution, supervised safety, and replayable proof.
+> X-Matrix turns reusable agent skills into verifiable onchain workflows on X Layer — with wallet-bound execution, supervised safety, and replayable proof.

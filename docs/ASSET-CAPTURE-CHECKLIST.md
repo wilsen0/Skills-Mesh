@@ -1,4 +1,4 @@
-# Skills Mesh Asset Capture Checklist
+# X-Matrix Asset Capture Checklist
 
 This document is for turning the current product path into usable presentation assets.
 
@@ -171,7 +171,7 @@ Already improved in CLI:
 - apply purpose hints
 - policy verdict explanation
 - replay decision recap
-- Skills Mesh naming cleanup in key surfaces
+- X-Matrix naming cleanup in key surfaces
 
 ---
 

@@ -606,7 +606,7 @@ export async function runDoctor(options: RunDoctorOptions = {}): Promise<DoctorR
   const ok = readiness.readiness !== "cannot_execute" && (!strictEnabled || strictPass);
 
   const summary = [
-    "Skills Mesh CLI",
+    "X-Matrix CLI",
     `Project root: ${paths.projectRoot}`,
     `Node: ${process.version}`,
     "",

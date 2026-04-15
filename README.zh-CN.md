@@ -1,4 +1,4 @@
-# Skills Mesh
+# X-Matrix
 
 [English](./README.md) | [中文详细版](./README.zh-CN.md)
 
@@ -10,7 +10,7 @@
 [![Node](https://img.shields.io/badge/node-%3E%3D22-green)]()
 [![TypeScript](https://img.shields.io/badge/lang-TypeScript%205.9-blue)]()
 
-**Skills Mesh** 是一套模块化、proof-carrying 的 skill runtime，用来构建**可验证的 onchain agent workflow**。每个 skill 都是一个自带类型化 artifact 合同的独立目录。运行时自动发现已安装 skill，将依赖图编译为并行执行计划，在执行前静态验证安全不变量，并为每个 artifact 构建密码学 Merkle DAG 完整性链——让每个工作流都可回放、可审计、可导出。
+**X-Matrix** 是一套模块化、proof-carrying 的 skill runtime，用来构建**可验证的 onchain agent workflow**。每个 skill 都是一个自带类型化 artifact 合同的独立目录。运行时自动发现已安装 skill，将依赖图编译为并行执行计划，在执行前静态验证安全不变量，并为每个 artifact 构建密码学 Merkle DAG 完整性链——让每个工作流都可回放、可审计、可导出。
 
 针对 Build X Season 2，当前旗舰路径已经对齐为一条 **X Layer 链上执行工作流**：分析和规划 skill 先生成 typed artifacts，`agent-wallet` 将执行绑定到 Agentic Wallet 身份，`official-executor` 则在满足条件时把 X Layer swap 写操作切到 **onchainos / DEX 执行路径**，同时保留原有单写路径安全模型。
 
@@ -28,7 +28,7 @@
 
 ![三层架构](./docs/architecture-zh.jpg)
 
-Skills Mesh 是一组模块化、proof-carrying 的 onchain skill pack：以 X Layer 作为链目标、Agentic Wallet 作为身份层，并在保留原执行安全边界的前提下，为符合条件的动作接入 onchainos / DEX 执行路径，让用户通过自然对话完成从目标设定到链上 workflow 的完整闭环。
+X-Matrix 是一组模块化、proof-carrying 的 onchain skill pack：以 X Layer 作为链目标、Agentic Wallet 作为身份层，并在保留原执行安全边界的前提下，为符合条件的动作接入 onchainos / DEX 执行路径，让用户通过自然对话完成从目标设定到链上 workflow 的完整闭环。
 
 ### 三层架构，严格边界
 
@@ -73,7 +73,7 @@ AI 交易产品的核心瓶颈不在"分析能力"，而在于：
 2. 写操作权限没有被严格收口——一个 rogue skill 就能造成资产损失。
 3. 决策过程不可解释——出了问题无法复盘，更无法证明"这个 skill 真的可以独立恢复和重跑"。
 
-Skills Mesh 把职责拆分到独立的 skill 中：
+X-Matrix 把职责拆分到独立的 skill 中：
 
 - **sensor skill** 负责观察（`portfolio-xray`、`market-scan`、`agent-wallet`）
 - **planner skill** 负责生成方案（`trade-thesis`、`hedge-planner`、`scenario-sim`）
@@ -128,7 +128,7 @@ Skills Mesh 把职责拆分到独立的 skill 中：
 
 > "帮我看看 BTC 的持仓风险，如果回撤超过 4%，给我一个对冲方案"
 
-OpenClaw 会自动编排 Skills Mesh skills：扫描持仓 → 分析市场 → 解析钱包身份 → 生成对冲方案 → policy 审核 → 生成执行路径（含 X Layer / wallet / integration 元数据）→ 在满足条件时切到 onchainos 执行。
+OpenClaw 会自动编排 X-Matrix skills：扫描持仓 → 分析市场 → 解析钱包身份 → 生成对冲方案 → policy 审核 → 生成执行路径（含 X Layer / wallet / integration 元数据）→ 在满足条件时切到 onchainos 执行。
 
 您还可以：
 
@@ -217,7 +217,7 @@ portfolio-xray → market-scan → trade-thesis → hedge-planner → scenario-s
 
 ### Artifact Handoff（而非自由对话）
 
-因为真正可维护的系统不能靠模块之间"互相猜意思"。Skills Mesh 采用 artifact handoff——typed、versioned、持久化、可回放、可导出。
+因为真正可维护的系统不能靠模块之间"互相猜意思"。X-Matrix 采用 artifact handoff——typed、versioned、持久化、可回放、可导出。
 
 关键 artifact 包括：
 `goal.intake` · `portfolio.snapshot` · `portfolio.risk-profile` · `market.snapshot` · `market.regime` · `trade.thesis` · `planning.proposals` · `planning.scenario-matrix` · `policy.plan-decision` · `identity.agent-wallet` · `execution.intent-bundle` · `execution.apply-decision` · `approval.ticket` · `execution.reconciliation` · `report.operator-summary` · `mesh.route-proof`
@@ -286,7 +286,7 @@ portfolio-xray → market-scan → trade-thesis → hedge-planner → scenario-s
 
 ## 10. 产品定位
 
-Skills Mesh 是面向 onchain 执行的模块化 skill runtime。它不是一个独立的交易终端，而是一组可安装、可组合、可验证的 skill product。
+X-Matrix 是面向 onchain 执行的模块化 skill runtime。它不是一个独立的交易终端，而是一组可安装、可组合、可验证的 skill product。
 
 核心价值：
 
@@ -295,7 +295,7 @@ Skills Mesh 是面向 onchain 执行的模块化 skill runtime。它不是一个
 - OKX Agent Trade Kit 作为唯一执行内核，写操作严格收口
 - 全流程 proof-carrying：可审计、可回放、可导出
 
-> Skills Mesh：面向 X Layer 的 proof-carrying 可复用技能网格。像装插件一样装 skill，用密码学证明验证每一次执行。
+> X-Matrix：面向 X Layer 的 proof-carrying 可复用技能网格。像装插件一样装 skill，用密码学证明验证每一次执行。
 
 ## License
 

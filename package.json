@@ -1,7 +1,7 @@
 {
-  "name": "okx-skill-mesh",
+  "name": "x-matrix",
   "version": "3.9.0",
-  "description": "CLI Skill Mesh 2.0 runtime for guarded OKX plan/apply/replay workflows.",
+  "description": "A proof-carrying skill matrix runtime for verifiable onchain agent workflows on X Layer.",
   "type": "module",
   "bin": {
     "trademesh": "./dist/bin/trademesh.js"

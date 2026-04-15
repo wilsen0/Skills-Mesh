@@ -1,6 +1,6 @@
-# Skills Mesh M2.8 Runbook
+# X-Matrix M2.8 Runbook
 
-This runbook covers supervised execution operations for the `v3` Skills Mesh runtime and artifacts, including portable verified bundles, demo receipt verification, and the wallet-aware X Layer execution path.
+This runbook covers supervised execution operations for the `v3` X-Matrix runtime and artifacts, including portable verified bundles, demo receipt verification, and the wallet-aware X Layer execution path.
 
 ## 1. Pre-Apply Execute Checklist
 

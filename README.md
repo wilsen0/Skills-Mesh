@@ -1,4 +1,4 @@
-# Skills Mesh
+# X-Matrix
 
 [English](./README.md) | [中文详细版](./README.zh-CN.md)
 
@@ -10,7 +10,7 @@
 [![Node](https://img.shields.io/badge/node-%3E%3D22-green)]()
 [![TypeScript](https://img.shields.io/badge/lang-TypeScript%205.9-blue)]()
 
-**Skills Mesh** is a modular, proof-carrying skill runtime for building verifiable onchain agent workflows. Each skill is a self-contained directory with a typed artifact contract. The runtime auto-discovers installed skills, compiles their dependency graph into parallel execution plans, statically verifies safety invariants before execution, and generates cryptographic Merkle DAG integrity chains — making every workflow replayable, auditable, and exportable.
+**X-Matrix** is a modular, proof-carrying skill runtime for building verifiable onchain agent workflows. Each skill is a self-contained directory with a typed artifact contract. The runtime auto-discovers installed skills, compiles their dependency graph into parallel execution plans, statically verifies safety invariants before execution, and generates cryptographic Merkle DAG integrity chains — making every workflow replayable, auditable, and exportable.
 
 For Build X Season 2, the flagship path is an **X Layer onchain execution workflow**: analysis and planning skills produce typed artifacts, `agent-wallet` binds execution to an Agentic Wallet identity, and `official-executor` routes eligible X Layer swap actions through **Onchain OS / DEX execution** while preserving the project’s single-write-path safety model.
 
@@ -286,7 +286,7 @@ Expected signal in the output:
 |----------|-------------|
 | [中文详细版](./README.zh-CN.md) | Full product walkthrough: positioning, architecture, safety model, user value |
 | [Quickstart](./docs/QUICKSTART.md) | Fastest path to the first useful run: doctor → plan → apply → export → replay |
-| [Use Cases](./docs/USE-CASES.md) | Real product scenarios: when to use Skills Mesh again, and why it matters |
+| [Use Cases](./docs/USE-CASES.md) | Real product scenarios: when to use X-Matrix again, and why it matters |
 | [Next Steps](./docs/NEXT-STEPS.md) | Current execution board: re-verify the product path, capture proof, improve UX, then record |
 | [Asset Capture Checklist](./docs/ASSET-CAPTURE-CHECKLIST.md) | Screenshot + recording asset checklist, plus the manual tasks to finish tomorrow |
 | [Build X Demo Script](./docs/BUILDX-DEMO-SCRIPT.md) | Proof-first demo and recording script for the core product path |

@@ -6,7 +6,7 @@
 
 ## Product First
 
-TradeMesh 2.0 is a `CLI Skill Mesh for OKX`.
+TradeMesh 2.0 is a `CLI X-Matrix for OKX`.
 
 Its primary value is not “having doctrines” and not “being an agent framework”. The primary value is:
 
