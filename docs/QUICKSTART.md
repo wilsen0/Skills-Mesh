@@ -140,7 +140,8 @@ If you are in a hurry, run exactly this:
 ```bash
 cd ~/apps/apps/okx-skill-mesh
 npm run build
-export SKILLS_MESH_AGENT_WALLET=<your_xlayer_wallet>
+# Copy .env.example to .env and fill in your wallet address (from OKX Agentic Wallet onboarding)
+cp .env.example .env
 node dist/bin/trademesh.js doctor --probe active --plane demo --strict --strict-target apply
 node dist/bin/trademesh.js plan "protect BTC downside with 4% max drawdown" --plane demo
 node dist/bin/trademesh.js apply <run-id> --plane demo --proposal perp-short --approve --approved-by demo-operator

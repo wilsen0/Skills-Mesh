@@ -1,7 +1,24 @@
 #!/usr/bin/env node
 
-import { readFile } from "node:fs/promises";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import process from "node:process";
+
+// Load .env from project root if present
+try {
+  const envPath = resolve(import.meta.dirname ?? ".", "..", "..", ".env");
+  for (const line of readFileSync(envPath, "utf8").split("\n")) {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith("#")) continue;
+    const eq = trimmed.indexOf("=");
+    if (eq > 0) {
+      const key = trimmed.slice(0, eq).trim();
+      if (!(key in process.env)) process.env[key] = trimmed.slice(eq + 1).trim();
+    }
+  }
+} catch { /* .env optional */ }
+
+import { readFile } from "node:fs/promises";
 import {
   applyRun,
   certifySkills,
