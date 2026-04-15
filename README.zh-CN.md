@@ -12,7 +12,7 @@
 
 **X-Matrix** 是一套模块化、proof-carrying 的 skill runtime，用来构建**可验证的 onchain agent workflow**。每个 skill 都是一个自带类型化 artifact 合同的独立目录。运行时自动发现已安装 skill，将依赖图编译为并行执行计划，在执行前静态验证安全不变量，并为每个 artifact 构建密码学 Merkle DAG 完整性链——让每个工作流都可回放、可审计、可导出。
 
-针对 Build X Season 2，当前旗舰路径已经对齐为一条 **X Layer 链上执行工作流**：分析和规划 skill 先生成 typed artifacts，`agent-wallet` 将执行绑定到 Agentic Wallet 身份，`official-executor` 则在满足条件时把 X Layer swap 写操作切到 **onchainos / DEX 执行路径**，同时保留原有单写路径安全模型。
+针对 Build X Season 2，当前旗舰路径已经对齐为一条 **X Layer 链上执行工作流**：分析和规划 skill 先生成 typed artifacts，`agent-wallet` 将执行绑定到 Agentic Wallet 身份，`official-executor` 则在满足条件时把 X Layer swap 写操作切到 **X Layer DEX / Onchain OS 执行路径**，同时保留原有单写路径安全模型。
 
 这不是一次性交易脚本，而是**可复用的 skill product**——今天可以驱动对冲工作流，明天也可以通过安装不同 skill pack 扩展为其他钱包感知的 onchain workflow。
 
@@ -20,7 +20,7 @@
 
 - **X Layer —— 原生链目标。** `agent-wallet` 解析钱包身份；`official-executor` 为每个 action 注入 wallet、chain (`xlayer`) 与集成元数据，实现 onchain 路由。
 - **Agentic Wallet 绑定。** skill 消费 `identity.agent-wallet`，让执行不只是“谁发起的”，而是明确绑定“哪一个链上身份来执行”。
-- **Onchain OS 执行路径。** 对符合条件的 X Layer swap 写操作，执行器会切到 `onchainos swap execute`；其他路径则继续兼容原有 OKX-oriented 执行模型。
+- **X Layer DEX 执行路径。** 对符合条件的 X Layer swap 写操作，执行器通过 Onchain OS / DEX 集成层路由；其他路径则继续兼容 OKX REST API 执行模型。
 - **Proof-carrying 执行。** 每次 run 产出 `mesh.route-proof`——机器可验证的执行证据，记录什么执行了、什么跳过了、为什么路由是最小充分的。可导出为便携 `bundle.json`，在任意环境回放。
 - **结构性安全。** 单一写路径（`official-executor`）、静态安全不变量验证、审批门禁、幂等账本、渐进式信任（`research` → `demo` → `live`）。
 
@@ -28,7 +28,7 @@
 
 ![三层架构](./docs/architecture-zh.jpg)
 
-X-Matrix 是一组模块化、proof-carrying 的 onchain skill pack：以 X Layer 作为链目标、Agentic Wallet 作为身份层，并在保留原执行安全边界的前提下，为符合条件的动作接入 onchainos / DEX 执行路径，让用户通过自然对话完成从目标设定到链上 workflow 的完整闭环。
+X-Matrix 是一组模块化、proof-carrying 的 onchain skill pack：以 X Layer 作为链目标、Agentic Wallet 作为身份层，并在保留原执行安全边界的前提下，为符合条件的动作接入 X Layer DEX 执行路径，让用户通过自然对话完成从目标设定到链上 workflow 的完整闭环。
 
 ### 三层架构，严格边界
 
@@ -54,8 +54,9 @@ X-Matrix 是一组模块化、proof-carrying 的 onchain skill pack：以 X Laye
 │  goal intake · idempotency ledger · reconcile           │
 │  route-proof · portable bundles · skill certification   │
 ├─────────────────────────────────────────────────────────┤
-│             OKX Agent Trade Kit + X Layer                │
-│  okx CLI · market · trade · portfolio · bot             │
+│             OKX V5 REST API + X Layer                   │
+│  market · account · trade · portfolio                   │
+│  (直接 REST 集成 — 唯一下单路径)                         │
 │  (确定性执行内核 — 唯一下单路径)                          │
 │  agent-wallet identity · xlayer chain routing            │
 └─────────────────────────────────────────────────────────┘
@@ -63,7 +64,7 @@ X-Matrix 是一组模块化、proof-carrying 的 onchain skill pack：以 X Laye
 
 - **Skill Packs（能力模块）**——每个 skill 是独立目录，自带 `SKILL.md` 清单。装一个得一种能力，装多个自动通过 artifact 依赖编排。系统能力面由已安装的 skill 动态决定，而非硬编码配置。
 - **Skill Runtime（编排引擎）**——编排与信任层。编译依赖图为并行执行计划、执行前静态验证安全不变量、构建 Merkle DAG 密码学完整性链。负责发现、策略、追踪、路由证明。不包含任何交易逻辑。
-- **Execution Kernel（执行内核）**——OKX Agent Trade Kit 是唯一到达交易所的路径。`agent-wallet` skill 解析钱包身份；`official-executor` 为每个 action 注入 wallet、chain、集成元数据，实现 X Layer on-chain 路由。本地签名、权限感知、模拟盘隔离。
+- **Execution Kernel（执行内核）**——OKX V5 REST API 是唯一到达交易所的路径。`agent-wallet` skill 解析钱包身份；`official-executor` 为每个 action 注入 wallet、chain、集成元数据，实现 X Layer on-chain 路由。HMAC-SHA256 签名、权限感知、模拟盘隔离。
 
 ## 2. 它解决什么问题
 
@@ -148,7 +149,7 @@ Agentic Wallet (`0x2dcb...eaf7e`) 绑定执行 + X Layer 链元数据：
 
 > "帮我看看 BTC 的持仓风险，如果回撤超过 4%，给我一个对冲方案"
 
-OpenClaw 会自动编排 X-Matrix skills：扫描持仓 → 分析市场 → 解析钱包身份 → 生成对冲方案 → policy 审核 → 生成执行路径（含 X Layer / wallet / integration 元数据）→ 在满足条件时切到 onchainos 执行。
+OpenClaw 会自动编排 X-Matrix skills：扫描持仓 → 分析市场 → 解析钱包身份 → 生成对冲方案 → policy 审核 → 生成执行路径（含 X Layer / wallet / integration 元数据）→ 通过 X Layer DEX 集成执行。
 
 您还可以：
 
@@ -196,7 +197,7 @@ trademesh export <run-id>
 
 ### 5.3 把执行权限收口
 
-- OKX Agent Trade Kit 官方 skill 负责底层执行
+- OKX V5 REST API 负责底层执行
 - 自定义高阶 skill 只做"读、想、审"，不直接写交易
 - `official-executor` 是唯一写路径，钱包感知，X Layer 路由
 - `policy-gate` 是写前必经节点
@@ -282,8 +283,8 @@ portfolio-xray → market-scan → trade-thesis → hedge-planner → scenario-s
 
 ### Official Skill Adapter
 
-- `runtime/official-skill-adapter.ts` 将 OKX CLI 命令构建从编排逻辑中提取出来
-- 任何 skill pack 均可复用 OKX CLI 能力而无需从 executor skill 目录导入
+- `runtime/official-skill-adapter.ts` 将 OKX REST API 请求构建从编排逻辑中提取出来
+- 任何 skill pack 均可复用 OKX API 能力而无需从 executor skill 目录导入
 - Doctor 探测包含 `official-skill` 模块级健康检查
 
 ## 9. 当前版本的能力范围
@@ -312,7 +313,7 @@ X-Matrix 是面向 onchain 执行的模块化 skill runtime。它不是一个独
 
 - 每个 skill 独立可用，多个 skill 自动编排
 - 钱包感知执行，X Layer 原生链路由
-- OKX Agent Trade Kit 作为唯一执行内核，写操作严格收口
+- OKX V5 REST API 作为唯一执行内核，写操作严格收口
 - 全流程 proof-carrying：可审计、可回放、可导出
 
 > X-Matrix：面向 X Layer 的 proof-carrying 可复用技能网格。像装插件一样装 skill，用密码学证明验证每一次执行。
